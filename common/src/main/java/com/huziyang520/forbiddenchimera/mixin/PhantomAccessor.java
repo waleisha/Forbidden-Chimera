@@ -16,8 +16,5 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface PhantomAccessor {
 
     @Accessor("moveTargetPoint")
-    Vec3 forbiddenChimera$getMoveTargetPoint();
-
-    @Accessor("moveTargetPoint")
     void forbiddenChimera$setMoveTargetPoint(Vec3 moveTargetPoint);
 }

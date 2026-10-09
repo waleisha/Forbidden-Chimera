@@ -1,60 +1,38 @@
 plugins {
-    id 'multiloader-common'
-    id 'net.neoforged.moddev'
+    id 'java-library'
+    id 'net.minecraftforge.gradle'
 }
 
-neoForge {
-    neoFormVersion = neo_form_version
-    // Automatically enable AccessTransformers if the file exists
-    def at = file('src/main/resources/META-INF/accesstransformer.cfg')
-    if (at.exists()) {
-        accessTransformers.from(at.absolutePath)
+version = mod_version
+group = mod_group_id
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+}
+
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+}
+
+repositories {
+    maven {
+        name = 'GeckoLib'
+        url = 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/'
     }
 }
 
 dependencies {
-    // Fabric and NeoForge both bundle Fabric Mixin, so it is safe to use it in common.
-    // Kept available even though the mod ships no mixin yet: behaviour patches will land here later.
-    compileOnly('net.fabricmc:sponge-mixin:0.17.3+mixin.0.8.7')
-    compileOnly(annotationProcessor('io.github.llamalad7:mixinextras-common:0.5.4'))
-    // GeckoLib drives the Creeper Phantom's animated model. `common` compiles against NeoForm, so the
-    // NeoForge build of GeckoLib is the closest match; both loaders expose the same com.geckolib API.
-    compileOnly files('../libs/geckolib-neoforge-26.3-5.5.6.jar')
+    // ForgeGradle requires a `minecraft` dependency to configure at all, even in a module that only
+    // compiles against it. `compileOnly` keeps Forge off this module's runtime classpath: the shared
+    // logic here deliberately imports nothing from net.minecraftforge, so it stays loader agnostic and
+    // could be reused by a Fabric or NeoForge module later.
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    compileOnly fg.deobf("software.bernie.geckolib:geckolib-forge-1.20.1:${geckolib_version}")
+
+    // Both loaders bundle Mixin; Forge ships it too, so the annotations are safe here.
+    compileOnly 'org.spongepowered:mixin:0.8.5'
 }
 
-configurations {
-    commonJava {
-        canBeResolved = false
-        canBeConsumed = true
-    }
-    commonResources {
-        canBeResolved = false
-        canBeConsumed = true
-    }
-}
-
-artifacts {
-    commonJava sourceSets.main.java.sourceDirectories.singleFile
-    commonResources sourceSets.main.resources.sourceDirectories.singleFile
-}
-
-// Implement mcgradleconventions loader attribute.
-// NOTE: sourcesElements / javadocElements no longer exist (sources & javadoc jars are not produced),
-// so configurations must be looked up with matching {} instead of named {} or the build fails.
-def loaderAttribute = Attribute.of('io.github.mcgradleconventions.loader', String)
-['apiElements', 'runtimeElements', 'sourcesElements', 'javadocElements'].each { variant ->
-    configurations.matching { it.name == variant }.configureEach {
-        attributes {
-            attribute(loaderAttribute, 'common')
-        }
-    }
-}
-sourceSets.configureEach {
-    [it.compileClasspathConfigurationName, it.runtimeClasspathConfigurationName].each { variant ->
-        configurations.matching { it.name == variant }.configureEach {
-            attributes {
-                attribute(loaderAttribute, 'common')
-            }
-        }
-    }
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
 }

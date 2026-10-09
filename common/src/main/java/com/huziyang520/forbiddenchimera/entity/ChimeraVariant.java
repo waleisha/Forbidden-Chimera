@@ -2,7 +2,6 @@ package com.huziyang520.forbiddenchimera.entity;
 
 import com.huziyang520.forbiddenchimera.config.ForbiddenChimeraConfig;
 import net.minecraft.util.RandomSource;
-import org.jspecify.annotations.Nullable;
 
 /**
  * Which chimera a vanilla phantom is playing.
@@ -34,7 +33,7 @@ public enum ChimeraVariant {
     /**
      * Resolves a persisted id.
      *
-     * @param id   the stored value.
+     * @param id       the stored value.
      * @param fallback value used when the id is unknown (e.g. a save from a newer version).
      */
     public static ChimeraVariant byId(int id, ChimeraVariant fallback) {
@@ -51,15 +50,12 @@ public enum ChimeraVariant {
      *
      * <p>Used for every phantom whose variant was never assigned by
      * {@link com.huziyang520.forbiddenchimera.world.ChimeraSpawner} - i.e. a vanilla
-     * {@code minecraft:phantom} spawn egg, {@code /summon}, or another mod creating one. Before 1.1.9
-     * this roll only knew RIDER and THROWER, so <b>every</b> egg/summoned phantom came out as a creeper
-     * carrier and a vanilla phantom could not be produced at all.
+     * {@code minecraft:phantom} spawn egg, {@code /summon}, or another mod creating one.
      *
      * <p>Only the variants that physically fit a vanilla phantom are in here: the diver (mob3),
      * lightning (mob4), nuclear (mob5) and enderman (mob6) chimeras are real registered entity types
      * with their own spawn eggs, and a {@code minecraft:phantom} entity cannot turn into another
-     * entity type. Natural spawning picks all seven in {@code ChimeraSpawner#candidates}, which is
-     * where the {@code vanillaSpawnWeight} of the full table is honoured.
+     * entity type. Natural spawning picks all seven in {@code ChimeraSpawner#candidates}.
      *
      * <p>Weights are read live so config edits apply to the next spawn. If every weight is 0 (or the
      * two carriers are disabled) the phantom stays vanilla rather than becoming a chimera.
@@ -84,15 +80,5 @@ public enum ChimeraVariant {
     /** @return whether this variant carries a creeper at all. */
     public boolean carriesCargo() {
         return this == RIDER || this == THROWER;
-    }
-
-    /** @return the matching variant, or {@code null} when the entity plays no chimera role. */
-    public static @Nullable ChimeraVariant ofNullable(int id) {
-        for (ChimeraVariant variant : values()) {
-            if (variant.id == id) {
-                return variant;
-            }
-        }
-        return null;
     }
 }

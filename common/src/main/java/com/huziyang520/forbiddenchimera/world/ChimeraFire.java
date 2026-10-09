@@ -12,8 +12,8 @@ import net.minecraft.world.phys.AABB;
  * The burning left behind by a chimera blast.
  *
  * <p>{@link ChimeraExplosion} runs a plain block-interaction explosion, which by itself does not set
- * anything on fire. The nuclear chimera is supposed to be a small tactical nuke, so its blast also has to
- * leave the area burning - that is this class.
+ * anything on fire. The nuclear chimera is supposed to be a small tactical nuke, so its blast also has
+ * to leave the area burning - that is this class.
  *
  * <p>Kept apart from {@code ChimeraExplosion} on purpose: the other blasts (the skull projectiles, the
  * creeper phantom's self destruct) are ordinary explosions and must stay fire-free, so only the caller
@@ -48,7 +48,9 @@ public final class ChimeraFire {
         AABB area = new AABB(x - reach, y - reach, z - reach, x + reach, y + reach, z + reach);
         for (LivingEntity living : level.getEntitiesOfClass(LivingEntity.class, area,
                 entity -> !entity.fireImmune())) {
-            living.igniteForTicks(fireTicks);
+            // 26.3's LivingEntity#igniteForTicks does not exist in 1.20.1; setRemainingFireTicks is the
+            // equivalent primitive and takes the same tick count.
+            living.setRemainingFireTicks(fireTicks);
         }
     }
 
@@ -57,8 +59,8 @@ public final class ChimeraFire {
      *
      * <p>Only exposed surface blocks are considered - an air block with something solid underneath - so a
      * blast in mid-air lights nothing instead of hanging fire in the sky. Fire is placed through
-     * {@link BaseFireBlock#getState}, the same call vanilla explosions use, so soul soil gets soul fire and
-     * a block that cannot hold fire is skipped rather than force-placed.
+     * {@link BaseFireBlock#getState}, the same call vanilla explosions use, so soul soil gets soul fire
+     * and a block that cannot hold fire is skipped rather than force-placed.
      */
     private static void lightGround(ServerLevel level, double x, double y, double z, double radius,
             double chance) {
@@ -77,7 +79,8 @@ public final class ChimeraFire {
                     if (!level.getBlockState(cursor).isAir()) {
                         continue;
                     }
-                    if (!level.getBlockState(cursor.below()).isSolidRender()) {
+                    BlockPos below = cursor.below();
+                    if (!level.getBlockState(below).isSolidRender(level, below)) {
                         continue;
                     }
                     BlockState fire = BaseFireBlock.getState(level, cursor);

@@ -7,44 +7,47 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.DifficultyInstance;
-import net.minecraft.world.entity.EntitySpawnReason;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.monster.zombie.Zombie;
+import net.minecraft.world.entity.monster.Zombie;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
-import net.minecraft.world.item.enchantment.providers.VanillaEnchantmentProviders;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * The baby zombie a knight variant chimera carries on its back: spawning, ownership, anchoring,
- * releasing, and its spawn equipment.
+ * The baby zombie the boss carries on its back: spawning, ownership, anchoring, releasing, and its
+ * spawn equipment.
  *
  * <p>Deliberately <b>not</b> built like {@link PhantomCargo}: the cargo is re-positioned by hand every
  * tick because it needs a negative (hanging) offset, but a rider has to move <b>with</b> its mount. So
  * the rider is a real vanilla {@code Zombie} with {@code setBaby(true)} that is mounted through the
- * <b>vanilla passenger</b> system - see {@link #anchor} for why hand-anchoring was wrong.
+ * <b>vanilla passenger</b> system.
  *
  * <p><b>Ownership</b> uses the same persistent tag trick as the cargo:
  * {@code forbidden_chimera_rider:<host uuid>}. Tags are part of the save format, so a reload adopts the
- * existing rider instead of spawning a second one. Vanilla only saves a vehicle's passengers nested in
- * the vehicle, so a reload cannot duplicate the rider either.
+ * existing rider instead of spawning a second one.
  *
  * <p><b>Geometry</b>: the mount point is the same derived model band constant the cargo rider uses,
- * see {@link PhantomCargo#MODEL_BAND_TOP}. It is applied through
- * {@code AbstractChimeraPhantom#getPassengerAttachmentPoint}, a code constant and never a config value,
- * so a model change cannot silently misalign the rider.
+ * see {@link PhantomCargo#MODEL_BAND_TOP}. It is applied through the host's passenger attachment
+ * override - a code constant and never a config value, so a model change cannot silently misalign it.
  *
- * <p><b>Equipment</b> is rolled here instead of calling {@code Zombie#finalizeSpawn}, because the
- * chances have to be configurable and the rider must always end up with a mace in its main hand. The
- * algorithm is a verbatim copy of {@code Mob#populateDefaultEquipmentSlots} with a configurable base
- * chance, plus the same spawn enchantment providers vanilla zombies use
- * ({@code VanillaEnchantmentProviders.MOB_SPAWN_EQUIPMENT}).
+ * <p><b>Porting notes from 26.3.</b> The knight variant (a mace-wielding baby zombie for the small
+ * Creeper Phantom) is <b>gone</b>: the mace does not exist in 1.20.1. This class therefore serves the
+ * boss alone, which carries a trident. Consequences:
+ * <ul>
+ *   <li>the weapon is now a fixed parameter with a single call site, so the
+ *       {@code adoptOrSpawn(level, host)} convenience overload is unnecessary;</li>
+ *   <li>26.3's {@code EnchantmentHelper#enchantItemFromProvider} became
+ *       {@code EnchantmentHelper#enchantItem} in 1.20.1, which rolls the enchantment table's own
+ *       provider chain - the closest available equivalent;</li>
+ *   <li>{@code Mob#WEARING_ARMOR_UPGRADE_MATERIAL_ATTEMPTS} / {@code _CHANCE} are not public in 1.20.1,
+ *       so the vanilla numbers (2 attempts, 0.5 chance) are spelled out here with a comment.</li>
+ * </ul>
  */
 public final class PhantomRider {
 
@@ -57,10 +60,13 @@ public final class PhantomRider {
     /** Rider stands on the model's back - the top of the phantom model band (see PhantomCargo). */
     public static final double RIDER_CARRY_HEIGHT = PhantomCargo.MODEL_BAND_TOP;
 
-
     /** Vanilla {@code Mob#EQUIPMENT_POPULATION_ORDER}: head first, so a helmet is the likely piece. */
     private static final List<EquipmentSlot> ARMOR_SLOTS = List.of(
             EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET);
+
+    /** Vanilla {@code Mob} numbers, private in 1.20.1: two upgrade attempts at half chance each. */
+    private static final int ARMOR_UPGRADE_ATTEMPTS = 2;
+    private static final float ARMOR_UPGRADE_CHANCE = 0.5F;
 
     private PhantomRider() {
     }
@@ -70,20 +76,12 @@ public final class PhantomRider {
      *
      * <p>Adoption first: an owned zombie may already exist (chunk reload, server restart, different tick
      * ordering), and spawning unconditionally would duplicate the rider.
-     *
-     * <p>This overload is the knight variant's: the rider carries a mace. The boss calls the
-     * weapon-parameterised overload with a trident instead.
      */
-    public static @Nullable Zombie adoptOrSpawn(ServerLevel level, Mob host) {
-        return adoptOrSpawn(level, host, Items.MACE);
-    }
-
-    /** {@link #adoptOrSpawn(ServerLevel, Mob)} with an explicit main hand weapon. */
     public static @Nullable Zombie adoptOrSpawn(ServerLevel level, Mob host, Item weapon) {
         Zombie owned = findOwned(host);
         if (owned != null) {
-            // An adopted rider may have been dismounted (death of an older host, a manual ejection,
-            // or a save that lost the passenger link): re-seat it instead of spawning a duplicate.
+            // An adopted rider may have been dismounted (death of an older host, a manual ejection, or a
+            // save that lost the passenger link): re-seat it instead of spawning a duplicate.
             // The health call is repeated here on purpose: a rider created by an older version still
             // carries vanilla's 20 points, and this is the only moment it passes through our code again.
             applyRiderHealth(owned);
@@ -98,7 +96,7 @@ public final class PhantomRider {
      * {@code weapon} and possibly armour, and never despawning on its own.
      */
     public static @Nullable Zombie spawn(ServerLevel level, Mob host, Item weapon) {
-        Zombie rider = EntityTypes.ZOMBIE.create(level, EntitySpawnReason.MOB_SUMMONED);
+        Zombie rider = EntityType.ZOMBIE.create(level);
         if (rider == null) {
             return null;
         }
@@ -133,8 +131,8 @@ public final class PhantomRider {
         maxHealth.setBaseValue(configured);
         if (!raised) {
             // Already at the configured pool: leave the current health alone. Without this guard the
-            // adopt path would fully heal a wounded rider every time the host reloads, because the
-            // boss re-adopts its passenger on load.
+            // adopt path would fully heal a wounded rider every time the host reloads, because the boss
+            // re-adopts its passenger on load.
             return;
         }
         // Just raised from vanilla's 20 (fresh spawn, or a rider saved by an older version): fill it up,
@@ -152,7 +150,7 @@ public final class PhantomRider {
         //     once per tick on the server.
         // Riding goes through Entity#rideTick -> positionRider on both sides, which fixes both.
         if (rider.getVehicle() != host) {
-            rider.startRiding(host, true, true);
+            rider.startRiding(host, true);
         }
     }
 
@@ -165,8 +163,9 @@ public final class PhantomRider {
         // Dismount first: the tag is what makes it "owned", and a still-riding zombie must not be
         // adopted by a later host that happens to reuse the slot.
         rider.stopRiding();
-        // 26.3 exposes the persistent tag set through entityTags(); copy before removing.
-        rider.entityTags().stream().filter(tag -> tag.startsWith(TAG_PREFIX)).toList()
+        // getTags() returns a live view of the tag set, so it is copied before removing from it.
+        List.copyOf(rider.getTags()).stream()
+                .filter(tag -> tag.startsWith(TAG_PREFIX))
                 .forEach(rider::removeTag);
         rider.setNoAi(false);
         rider.setNoGravity(false);
@@ -186,7 +185,7 @@ public final class PhantomRider {
         String tag = tagFor(host);
         return host.level().getEntitiesOfClass(Zombie.class,
                 host.getBoundingBox().inflate(SEARCH_RADIUS),
-                candidate -> candidate.entityTags().contains(tag));
+                candidate -> candidate.getTags().contains(tag));
     }
 
     private static String tagFor(Mob host) {
@@ -205,10 +204,10 @@ public final class PhantomRider {
         // The weapon is not a roll: a rider without its weapon is just a passenger.
         rider.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(weapon));
 
-        rollArmor(rider, random, difficulty, config.knightArmorChance);
-        enchantSlot(level, rider, EquipmentSlot.MAINHAND, random, difficulty, config.knightWeaponEnchantChance);
+        rollArmor(rider, random, difficulty, config.riderArmorChance);
+        enchantSlot(rider, EquipmentSlot.MAINHAND, random, difficulty, config.riderWeaponEnchantChance);
         for (EquipmentSlot slot : ARMOR_SLOTS) {
-            enchantSlot(level, rider, slot, random, difficulty, config.knightArmorEnchantChance);
+            enchantSlot(rider, slot, random, difficulty, config.riderArmorEnchantChance);
         }
     }
 
@@ -223,8 +222,8 @@ public final class PhantomRider {
             return;
         }
         int armorType = random.nextInt(3);
-        for (int attempt = 1; attempt <= Mob.WEARING_ARMOR_UPGRADE_MATERIAL_ATTEMPTS; attempt++) {
-            if (random.nextFloat() < Mob.WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE) {
+        for (int attempt = 1; attempt <= ARMOR_UPGRADE_ATTEMPTS; attempt++) {
+            if (random.nextFloat() < ARMOR_UPGRADE_CHANCE) {
                 armorType++;
             }
         }
@@ -245,15 +244,20 @@ public final class PhantomRider {
         }
     }
 
-    /** Same as {@code Mob#enchantSpawnedEquipment}, with the chance supplied by config. */
-    private static void enchantSlot(ServerLevel level, Mob rider, EquipmentSlot slot, RandomSource random,
+    /**
+     * Same as {@code Mob#enchantSpawnedEquipment}, with the chance supplied by config.
+     *
+     * <p>{@code enchantItemFromProvider} does not exist in 1.20.1; {@code EnchantmentHelper#enchantItem}
+     * is the 1.20.1 entry point and applies the same spawn-equipment enchantment logic internally.
+     */
+    private static void enchantSlot(Zombie rider, EquipmentSlot slot, RandomSource random,
                                     DifficultyInstance difficulty, float chance) {
         ItemStack stack = rider.getItemBySlot(slot);
         if (stack.isEmpty() || random.nextFloat() >= chance * difficulty.getSpecialMultiplier()) {
             return;
         }
-        EnchantmentHelper.enchantItemFromProvider(stack, level.registryAccess(),
-                VanillaEnchantmentProviders.MOB_SPAWN_EQUIPMENT, difficulty, random);
-        rider.setItemSlot(slot, stack);
+        ItemStack enchanted = EnchantmentHelper.enchantItem(random, stack,
+                (int) difficulty.getEffectiveDifficulty(), true);
+        rider.setItemSlot(slot, enchanted);
     }
 }

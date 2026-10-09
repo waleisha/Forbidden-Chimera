@@ -8,8 +8,8 @@ import net.minecraft.world.entity.monster.Monster;
  * Attribute suppliers for the chimera mobs.
  *
  * <p>None of these entity types exist in vanilla {@code DefaultAttributes}, therefore they MUST be
- * registered by each loader (Fabric: {@code FabricDefaultAttributeRegistry}, NeoForge:
- * {@code EntityAttributeCreationEvent}) or the game crashes the first time one spawns.
+ * registered through Forge's {@code EntityAttributeCreationEvent} or the game crashes the first time
+ * one spawns.
  *
  * <p>{@code ATTACK_DAMAGE} in particular is mandatory: {@code LivingEntity#getAttribute} of our own
  * mobs will be null without it.
@@ -42,8 +42,8 @@ public final class ModAttributes {
     }
 
     /**
-     * Nuclear Creeper Phantom: 16 health = 8 hearts, same as the other two. The threat is the blast, not
-     * the health bar - and a short health bar means the player can shoot the bomb down mid hover.
+     * Nuclear Creeper Phantom: 16 health = 8 hearts. The threat is the blast, not the health bar -
+     * and a short health bar means the player can shoot the bomb down mid hover.
      */
     public static AttributeSupplier nuclearCreeperPhantom() {
         return Monster.createMonsterAttributes()
@@ -67,12 +67,12 @@ public final class ModAttributes {
     }
 
     /**
-     * The boss: 150 health = 75 hearts, as specified.
+     * The boss: 150 health = 75 hearts.
      *
      * <p>{@code ATTACK_DAMAGE} stays close to the other divers on purpose - the boss's threat is the head
-     * cluster, not its body slam, and its dive damage is dealt by the trident rider anyway. It is also
-     * immune to nothing here: the 90% explosion reduction is implemented in the entity ({@code
-     * hurtServer}), because it has to cover <b>vanilla</b> explosions too, which an attribute cannot do.
+     * cluster, not its body slam. The 90% explosion reduction is implemented through a damage event in
+     * {@link com.huziyang520.forbiddenchimera.world.ChimeraExplosion}, because it has to cover
+     * <b>vanilla</b> explosions too, which an attribute cannot do.
      */
     public static AttributeSupplier bossLightningCreeperPhantomKnight() {
         return Monster.createMonsterAttributes()

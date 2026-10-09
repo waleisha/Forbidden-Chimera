@@ -1,0 +1,149 @@
+plugins {
+    id 'net.minecraftforge.gradle'
+    id 'org.spongepowered.mixin'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = "${mod_id}-forge-${minecraft_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+}
+
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+    copyIdeResources = true
+
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', ''
+            property 'forge.logging.console.level', 'debug'
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                    // The shared module's sources are compiled into this jar, so they have to be part
+                    // of the run config's mod sources as well or the dev launch sees a half empty mod.
+                    source project(':common').sourceSets.main
+                }
+            }
+        }
+
+        client {
+            property 'forge.enabledGameTestNamespaces', mod_id
+        }
+
+        server {
+            property 'forge.enabledGameTestNamespaces', mod_id
+            args '--nogui'
+        }
+
+        data {
+            workingDirectory project.file('run-data')
+            args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'),
+                    '--existing', file('src/main/resources/'),
+                    '--existing', project(':common').file('src/main/resources/')
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+mixin {
+    add sourceSets.main, "${mod_id}.refmap.json"
+    config "${mod_id}.mixins.json"
+}
+
+repositories {
+    maven {
+        name = 'GeckoLib'
+        url = 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/'
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    implementation fg.deobf("software.bernie.geckolib:geckolib-forge-1.20.1:${geckolib_version}")
+
+    // Mixin's own annotations, needed because the shared module's mixin sources are compiled here (see
+    // the compileJava block below) and must resolve against this module's classpath.
+    compileOnly 'org.spongepowered:mixin:0.8.5'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+// The shared module's sources are compiled *by this module* rather than consumed as a built artifact.
+//
+// Why this matters: the Mixin annotation processor only generates the refmap from sources it actually
+// compiles. If common arrived as a pre-built jar, its four @Mixin classes would never be seen by the
+// processor, no refmap would be produced, and every injection would fail at runtime with
+// "No candidates were found matching ..." - while the build still reported success.
+def mixinRefmap = layout.buildDirectory.file("tmp/compileJava/${mod_id}.refmap.json")
+
+tasks.named('compileJava', JavaCompile).configure {
+    source project(':common').file('src/main/java')
+
+    // The refmap is produced by the annotation processor as a side effect of this task, so it is
+    // declared as an output. Without this, a `compileJava FROM-CACHE` restore brings back the .class
+    // files and nothing else: the refmap simply does not exist on disk, the jar silently ships without
+    // it, and every mixin then fails in a real (obfuscated) game with
+    //   "No candidates were found matching goalSelector:... in net/minecraft/world/entity/Mob"
+    // Declaring it as an output makes Gradle cache and restore the file together with the classes, so
+    // the jar is correct whether the task compiled or was restored.
+    outputs.file(mixinRefmap)
+}
+
+// The assets, data and the mixin config itself live in common, so its resource tree is folded into the
+// single published jar. Classes are deliberately NOT taken from common's output: this module's own
+// compileJava produced them (see above), and copying both would put every class in the jar twice.
+//
+// The refmap needs no `from` here: declaring it as an output of compileJava above is enough for both
+// Gradle's cache and MixinGradle's own addMixinsToJar, which folds it in from that same path. Adding it
+// explicitly as well makes jar fail with "Entry ... is a duplicate".
+tasks.named('jar', Jar).configure {
+    from project(':common').file('src/main/resources')
+
+    manifest {
+        attributes([
+                'Specification-Title'   : mod_id,
+                'Specification-Vendor'  : mod_authors,
+                'Specification-Version' : '1',
+                'Implementation-Title'  : project.name,
+                'Implementation-Version': project.jar.archiveVersion,
+                'Implementation-Vendor' : mod_authors,
+                'MixinConfigs'          : "${mod_id}.mixins.json"
+        ])
+    }
+
+    finalizedBy 'reobfJar'
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            forge_version          : forge_version,
+            forge_version_range    : forge_version_range,
+            loader_version_range   : loader_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+            mod_authors            : mod_authors,
+            mod_description        : mod_description,
+            geckolib_version       : geckolib_version,
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

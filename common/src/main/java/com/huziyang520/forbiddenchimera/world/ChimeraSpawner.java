@@ -13,17 +13,16 @@ import net.minecraft.stats.Stats;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.DifficultyInstance;
-import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.entity.SpawnGroupData;
 import net.minecraft.world.entity.monster.Phantom;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.NaturalSpawner;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.material.FluidState;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The insomnia driven spawner that replaces the vanilla phantom.
@@ -38,14 +37,14 @@ import org.jspecify.annotations.Nullable;
  * control here, so the chimeras inherit every one of those rules verbatim - they simply take the
  * phantom's place in the world instead of spawning alongside it.
  *
- * <p>mob1 and mob2 spawn as real vanilla phantoms carrying a vanilla creeper: this spawner only
- * assigns the variant through {@link ChimeraPhantom#forbiddenChimera$setVariant(int)} and the
- * behaviour (cargo, goals) is attached by {@code PhantomMixin}. mob3 is a real entity type.
+ * <p>mob1 and mob2 spawn as real vanilla phantoms carrying a vanilla creeper: this spawner only assigns
+ * the variant through {@link ChimeraPhantom#forbiddenChimera$setVariant} and the behaviour (cargo,
+ * goals) is attached by {@code PhantomMixin}. mob3 and up are real entity types.
  *
- * <p>Sunlight is deliberately not a threat: daylight burning in 26.3 is driven by the
- * {@code minecraft:burn_in_daylight} entity type tag ({@code Mob#aiStep} checks it before calling
- * {@code burnUndead}), and none of the chimeras are added to that tag. The vanilla phantom is not in
- * the tag either, so that behaviour matches vanilla exactly.
+ * <p><b>Porting note on the game rule.</b> 1.20.1 has no {@code spawn_phantoms} rule - that arrived with
+ * the phantom spawner rework. The vanilla equivalent here is {@code doInsomnia}, which is exactly the
+ * gate {@code PhantomSpawner} itself uses in this version, so the config key reads that instead.
+ * Behaviour for a server owner is identical: turning insomnia off stops the chimeras too.
  */
 public final class ChimeraSpawner {
 
@@ -74,11 +73,11 @@ public final class ChimeraSpawner {
         if (!spawnEnemies) {
             return nextTick;
         }
-        // Phantoms are gated behind their own game rule; the chimeras inherit it so server owners can
-        // still switch the whole mechanic off. The toggle exists so a server owner who wants the
-        // chimeras to ignore the vanilla phantom rule can decouple them.
+        // Phantoms are gated behind the insomnia rule in 1.20.1; the chimeras inherit it so server
+        // owners can still switch the whole mechanic off. The toggle exists so a server owner who wants
+        // the chimeras to ignore the vanilla rule can decouple them.
         if (ForbiddenChimeraConfig.get().chimeraSpawnerUsesPhantomGameRule
-                && !level.getGameRules().get(GameRules.SPAWN_PHANTOMS)) {
+                && !level.getGameRules().getBoolean(GameRules.RULE_DOINSOMNIA)) {
             return nextTick;
         }
 
@@ -132,7 +131,7 @@ public final class ChimeraSpawner {
 
             BlockState blockState = level.getBlockState(spawnPos);
             FluidState fluidState = level.getFluidState(spawnPos);
-            EntityType<?> checkType = candidate.type() != null ? candidate.type() : EntityTypes.PHANTOM;
+            EntityType<?> checkType = candidate.type() != null ? candidate.type() : EntityType.PHANTOM;
             if (!NaturalSpawner.isValidEmptySpawnBlock(level, spawnPos, blockState, fluidState, checkType)) {
                 continue;
             }
@@ -164,19 +163,19 @@ public final class ChimeraSpawner {
             candidates.add(new Candidate(ChimeraVariant.THROWER, null, config.throwerSpawnWeight));
         }
         if (config.enableCreeperPhantom && config.diverSpawnWeight > 0) {
-            candidates.add(new Candidate(ChimeraVariant.UNDECIDED, ModEntities.creeperPhantom(),
+            candidates.add(new Candidate(ChimeraVariant.UNDECIDED, ModEntities.CREEPER_PHANTOM.get(),
                     config.diverSpawnWeight));
         }
         if (config.enableLightningCreeperPhantom && config.lightningDiverSpawnWeight > 0) {
-            candidates.add(new Candidate(ChimeraVariant.UNDECIDED, ModEntities.lightningCreeperPhantom(),
+            candidates.add(new Candidate(ChimeraVariant.UNDECIDED, ModEntities.LIGHTNING_CREEPER_PHANTOM.get(),
                     config.lightningDiverSpawnWeight));
         }
         if (config.enableNuclearCreeperPhantom && config.nuclearSpawnWeight > 0) {
-            candidates.add(new Candidate(ChimeraVariant.UNDECIDED, ModEntities.nuclearCreeperPhantom(),
+            candidates.add(new Candidate(ChimeraVariant.UNDECIDED, ModEntities.NUCLEAR_CREEPER_PHANTOM.get(),
                     config.nuclearSpawnWeight));
         }
         if (config.enableEndermanPhantom && config.endermanSpawnWeight > 0) {
-            candidates.add(new Candidate(ChimeraVariant.UNDECIDED, ModEntities.endermanPhantom(),
+            candidates.add(new Candidate(ChimeraVariant.UNDECIDED, ModEntities.ENDERMAN_PHANTOM.get(),
                     config.endermanSpawnWeight));
         }
         return candidates;
@@ -202,24 +201,25 @@ public final class ChimeraSpawner {
                                                      @Nullable SpawnGroupData groupData) {
         Mob mob;
         if (candidate.type() != null) {
-            // mob3: a real registered entity type.
-            mob = candidate.type().create(level, EntitySpawnReason.NATURAL);
+            // A real registered entity type. 1.20.1 creates without a spawn type and passes it to
+            // finalizeSpawn below instead.
+            mob = candidate.type().create(level);
             if (mob == null) {
                 return groupData;
             }
-            mob.snapTo(spawnPos, 0.0F, 0.0F);
+            mob.moveTo(spawnPos, 0.0F, 0.0F);
         } else {
             // mob1/mob2: a real vanilla phantom, tagged with its chimera variant. The cargo creeper
             // and the goals are attached by PhantomMixin on its first tick.
-            Phantom phantom = EntityTypes.PHANTOM.create(level, EntitySpawnReason.NATURAL);
+            Phantom phantom = EntityType.PHANTOM.create(level);
             if (phantom == null) {
                 return groupData;
             }
             ((ChimeraPhantom) phantom).forbiddenChimera$setVariant(candidate.variant());
-            phantom.snapTo(spawnPos, 0.0F, 0.0F);
+            phantom.moveTo(spawnPos, 0.0F, 0.0F);
             mob = phantom;
         }
-        groupData = mob.finalizeSpawn(level, difficulty, EntitySpawnReason.NATURAL, groupData);
+        groupData = mob.finalizeSpawn(level, difficulty, MobSpawnType.NATURAL, groupData, null);
         level.addFreshEntity(mob);
         return groupData;
     }
@@ -228,7 +228,7 @@ public final class ChimeraSpawner {
      * One entry of the insomnia spawn table.
      *
      * @param variant the phantom chimera variant to stamp onto a vanilla phantom.
-     * @param type    the entity type for real entities (mob3); {@code null} for phantom variants.
+     * @param type    the entity type for real entities; {@code null} for phantom variants.
      * @param weight  strictly positive spawn weight.
      */
     private record Candidate(ChimeraVariant variant, @Nullable EntityType<? extends Mob> type, int weight) {

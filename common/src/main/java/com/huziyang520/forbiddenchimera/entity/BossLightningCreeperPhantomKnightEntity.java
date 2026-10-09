@@ -1,15 +1,11 @@
 package com.huziyang520.forbiddenchimera.entity;
 
-import com.geckolib.animatable.manager.AnimatableManager;
-import com.geckolib.animation.AnimationController;
-import com.geckolib.animation.RawAnimation;
-import com.geckolib.animation.object.PlayState;
-import com.geckolib.animation.state.AnimationTest;
 import com.huziyang520.forbiddenchimera.ai.BossAttackGoal;
 import com.huziyang520.forbiddenchimera.config.ForbiddenChimeraConfig;
 import com.huziyang520.forbiddenchimera.world.PhantomRider;
 import java.util.List;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -26,15 +22,18 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.entity.monster.zombie.Zombie;
-import net.minecraft.world.entity.projectile.hurtingprojectile.DragonFireball;
-import net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull;
+import net.minecraft.world.entity.monster.Zombie;
+import net.minecraft.world.entity.projectile.DragonFireball;
+import net.minecraft.world.entity.projectile.WitherSkull;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.storage.ValueInput;
-import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import software.bernie.geckolib.core.animation.AnimationController;
+import software.bernie.geckolib.core.animation.AnimatableManager;
+import software.bernie.geckolib.core.animation.AnimationState;
+import software.bernie.geckolib.core.animation.RawAnimation;
+import software.bernie.geckolib.core.object.PlayState;
 
 /**
  * 首领 · 闪电苦力怕幻翼骑士 - the boss.
@@ -45,20 +44,13 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p>Behaviour lives in {@link BossAttackGoal}; this class owns the parts that are not movement:
  * <ul>
- *   <li><b>animation state</b> - a synced id drives which of the seven clips plays, so both sides always
- *       agree (same approach as the nuclear variant);</li>
+ *   <li><b>animation state</b> - a synced id drives which of the seven clips plays;</li>
  *   <li><b>闪电苦力怕头颅 side arm</b> - the ordinary ranged attack: one lightning creeper skull every
- *       {@code bossSideArmCooldownTicks}, fired from the entity tick while it is not diving. This is what
- *       the player sees most of the time;</li>
- *   <li><b>凋灵之手 salvo</b> - the burst, driven by {@link BossAttackGoal}'s special phase, alternating
- *       left/right wing and then the three heads of that side;</li>
- *   <li><b>rider</b> - a vanilla baby zombie with a trident, maintained through {@link PhantomRider}
- *       exactly like the knight variant's mace rider;</li>
+ *       {@code bossSideArmCooldownTicks}, fired from the entity tick while it is not diving;</li>
+ *   <li><b>凋灵之手 salvo</b> - the burst, driven by {@link BossAttackGoal}'s special phase;</li>
+ *   <li><b>rider</b> - a vanilla baby zombie with a trident, maintained through {@link PhantomRider};</li>
  *   <li><b>explosion resistance</b> - 90% off every explosion damage source, vanilla ones included.</li>
  * </ul>
- *
- * <p>Getting here at all takes a dragon head, a nether star's worth of rarity and a warden's worth of
- * noise; it is not meant to be a fair fight.
  */
 public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPhantomEntity {
 
@@ -89,13 +81,20 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
     private static final double SONIC_BOOM_KNOCKBACK_VERTICAL = 0.5D;
     private static final double SONIC_BOOM_KNOCKBACK_HORIZONTAL = 2.5D;
     /**
-     * How far the parting scream reaches. Wider than the warden's own {@code SonicBoom#DISTANCE_XZ}
-     * (15) / {@code DISTANCE_Y} (20) on 2026-09-26 by user request: at the warden's numbers the boss
-     * usually drifted out of range while lining up the pass-by, so the move was skipped and the whole
-     * sonic boom clip never played. The damage/knockback numbers themselves are still the warden's.
+     * How far the parting scream reaches. Wider than the warden's own {@code SonicBoom} distances on
+     * user request: at the warden's numbers the boss usually drifted out of range while lining up the
+     * pass-by, so the move was skipped and the whole sonic boom clip never played. The damage and
+     * knockback numbers themselves are still the warden's.
      */
     private static final double SONIC_BOOM_RANGE = 24.0D;
     private static final double SONIC_BOOM_RANGE_Y = 32.0D;
+
+    /** Three wither heads per wing, matching the model. */
+    private static final int WITHER_HEADS_PER_WING = 3;
+    /** Aim jitter, in blocks, of an ordinary side arm shot. */
+    private static final double SIDE_ARM_SPREAD = 0.16D;
+    /** How often the boss looks for a rider it lost to a reload. One second is plenty. */
+    private static final int RIDER_RESCAN_INTERVAL = 20;
 
     private final AnimationController<BossLightningCreeperPhantomKnightEntity> mainController;
 
@@ -115,17 +114,10 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
     private int witherHead;
     /** True while the dive is running; the volley is suppressed so the charge is readable. */
     private boolean bossDiving;
-    /** Whether the one time rider hand out has already happened. See the first tick in {@link #tick}. */
+    /** Whether the one time rider hand out has already happened. */
     private boolean riderInitialised;
-    /**
-     * Ticks until the next re-adopt scan while the boss has no rider.
-     *
-     * <p>{@link #tickRider} only needs the rider field back after a chunk reload; searching every tick
-     * once the rider is permanently dead is pure waste. See {@link #RIDER_RESCAN_INTERVAL}.
-     */
+    /** Ticks until the next re-adopt scan while the boss has no rider. */
     private int riderRescanCooldown;
-    /** How often the boss looks for a rider it lost to a reload. One second is plenty. */
-    private static final int RIDER_RESCAN_INTERVAL = 20;
 
     // --- 高低差脱困 (stuck on a ledge) --------------------------------------
     /** 观察窗口起点的位置；与 {@link #stuckTicks} 一起判断"有没有真的挪动"。 */
@@ -139,17 +131,27 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
     /** 脱困时朝上补的速度，够抬过一格台阶即可。 */
     private static final double STUCK_LIFT = 0.45D;
 
+    /**
+     * NBT key marking that this individual has already handed out its one rider.
+     *
+     * <p>Why it has to be persisted: {@code riderInitialised} is a plain field, so any reload resets it.
+     * A player dying and respawning unloads and reloads the chunks around the boss, and if the rider had
+     * died in the meantime the next load handed out a <b>brand new</b> rider. One boss, one rider, for
+     * its whole life.
+     */
+    private static final String RIDER_GIVEN_KEY = "ForbiddenChimeraRiderGiven";
+
     public BossLightningCreeperPhantomKnightEntity(
             EntityType<? extends BossLightningCreeperPhantomKnightEntity> type, Level level) {
         super(type, level);
         this.xpReward = 100;
-        this.mainController = new AnimationController<>("main", 4, this::selectAnimation);
+        this.mainController = new AnimationController<>(this, "main", 4, this::selectAnimation);
     }
 
     @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        super.defineSynchedData(builder);
-        builder.define(DATA_BOSS_ANIMATION, ANIM_FLY);
+    protected void defineSynchedData() {
+        super.defineSynchedData();
+        this.entityData.define(DATA_BOSS_ANIMATION, ANIM_FLY);
     }
 
     // --- animation ----------------------------------------------------------
@@ -160,8 +162,8 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
         controllers.add(this.mainController);
     }
 
-    private PlayState selectAnimation(AnimationTest<BossLightningCreeperPhantomKnightEntity> state) {
-        BossLightningCreeperPhantomKnightEntity entity = state.animatable();
+    private PlayState selectAnimation(AnimationState<BossLightningCreeperPhantomKnightEntity> state) {
+        BossLightningCreeperPhantomKnightEntity entity = state.getAnimatable();
         return switch (entity.bossAnimation()) {
             case ANIM_DIVE -> state.setAndContinue(DIVE);
             case ANIM_SALVO -> state.setAndContinue(SALVO);
@@ -175,11 +177,11 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
 
     /** Synced animation id, see the {@code ANIM_*} constants. */
     public int bossAnimation() {
-        return this.getEntityData().get(DATA_BOSS_ANIMATION);
+        return this.entityData.get(DATA_BOSS_ANIMATION);
     }
 
     public void setBossAnimation(int animation) {
-        this.getEntityData().set(DATA_BOSS_ANIMATION, animation);
+        this.entityData.set(DATA_BOSS_ANIMATION, animation);
     }
 
     // --- attack goal hookup -------------------------------------------------
@@ -190,12 +192,6 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
         return new BossAttackGoal(this);
     }
 
-    /** The spear variant is one of the small divers' quirks; the boss never carries one. */
-    @Override
-    protected boolean supportsSpearVariant() {
-        return false;
-    }
-
     /**
      * Explosion resistance: every explosion hurts the boss at {@code bossExplosionDamageFactor} of its
      * normal damage. Scaling the incoming damage here - rather than making the entity invulnerable -
@@ -203,11 +199,11 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
      * mod's own blasts.
      */
     @Override
-    public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+    public boolean hurt(DamageSource source, float damage) {
         if (source.is(DamageTypeTags.IS_EXPLOSION)) {
             damage *= (float) ForbiddenChimeraConfig.get().bossExplosionDamageFactor;
         }
-        return super.hurtServer(level, source, damage);
+        return super.hurt(source, damage);
     }
 
     // --- rider --------------------------------------------------------------
@@ -222,9 +218,9 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
     }
 
     /**
-     * Keeps the boss's trident rider alive and anchored. Same lifecycle rules as the knight variant: the
-     * rider is adopted if it already exists (never duplicated across a reload) and is <b>not</b> replaced
-     * once lost, because "whichever of the two dies, the other carries on".
+     * Keeps the boss's trident rider alive and anchored. Same lifecycle rules as always: the rider is
+     * adopted if it already exists (never duplicated across a reload) and is <b>not</b> replaced once
+     * lost, because "whichever of the two dies, the other carries on".
      */
     private void tickRider(ServerLevel level) {
         Zombie current = this.knightRider();
@@ -235,9 +231,7 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
             // longer release when we die.
             //
             // Throttled: the search inflates a 16 block box, and once the rider is dead for good this
-            // branch is reached on every single tick for the rest of the boss's life. A rescan every
-            // RIDER_RESCAN_INTERVAL ticks finds a reloaded rider just as well - the field it restores is
-            // only ever read for anchoring and release, neither of which cares about a one second delay.
+            // branch is reached on every single tick for the rest of the boss's life.
             if (this.riderInitialised && --this.riderRescanCooldown <= 0) {
                 this.riderRescanCooldown = RIDER_RESCAN_INTERVAL;
                 this.setRider(PhantomRider.findOwned(this));
@@ -261,28 +255,17 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
         }
     }
 
-    /**
-     * NBT key marking that this individual has already handed out its one rider.
-     *
-     * <p>Why it has to be persisted: {@code riderInitialised} is a plain field, so any reload resets it.
-     * A player dying and respawning unloads and reloads the chunks around the boss, and if the rider had
-     * died in the meantime (the boss's own skulls are perfectly capable of killing it) the next load
-     * handed out a <b>brand new</b> rider - the "the baby zombie regenerates, seems tied to respawning"
-     * report. One boss, one rider, for its whole life; see D22's "whichever of the two dies, the other
-     * carries on".
-     */
-    private static final String RIDER_GIVEN_KEY = "ForbiddenChimeraRiderGiven";
-
+    // `public` because Mob widens these two from Entity's protected to public in 1.20.1.
     @Override
-    protected void addAdditionalSaveData(ValueOutput output) {
-        super.addAdditionalSaveData(output);
-        output.putBoolean(RIDER_GIVEN_KEY, this.riderInitialised);
+    public void addAdditionalSaveData(CompoundTag tag) {
+        super.addAdditionalSaveData(tag);
+        tag.putBoolean(RIDER_GIVEN_KEY, this.riderInitialised);
     }
 
     @Override
-    protected void readAdditionalSaveData(ValueInput input) {
-        super.readAdditionalSaveData(input);
-        this.riderInitialised = input.getBooleanOr(RIDER_GIVEN_KEY, false);
+    public void readAdditionalSaveData(CompoundTag tag) {
+        super.readAdditionalSaveData(tag);
+        this.riderInitialised = tag.getBoolean(RIDER_GIVEN_KEY);
     }
 
     /**
@@ -294,7 +277,7 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
         if (current == null) {
             return false;
         }
-        return current.doHurtTarget(level, target);
+        return current.doHurtTarget(target);
     }
 
     // --- wither skull volley ------------------------------------------------
@@ -306,11 +289,11 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
      * {@link BossAttackGoal}'s special phase, so no cooldown is touched here. The alternating side/head
      * counters live on the entity because they have to survive a phase change.
      *
-     * <p>Muzzle position: the per-head bones exist in the model ({@code boss_wither_skull_left_1..3} and
-     * the right trio), but a bone pivot is model space - turning it into a world position needs the full
-     * render transform, and this project's rule is to measure that in game rather than copy the modelled
-     * draft offsets. Until that calibration is done the skulls leave from the body centre; the side and
-     * head counters below already encode the alternating pattern, so only this method has to change.
+     * <p>Muzzle position: the per-head bones exist in the model, but a bone pivot is model space -
+     * turning it into a world position needs the full render transform, and this project's rule is to
+     * measure that in game rather than copy modelled draft offsets. Until that calibration is done the
+     * skulls leave from the body centre; the side and head counters below already encode the alternating
+     * pattern, so only this method has to change.
      */
     public void fireWitherVolleyShot(LivingEntity target) {
         if (!(this.level() instanceof ServerLevel serverLevel)) {
@@ -324,7 +307,7 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
 
         // A plain skull: `WitherSkull`'s dangerous flag defaults to false, so this is the blue,
         // non terrain destroying variant, which is what a volley should be.
-        WitherSkull skull = new WitherSkull(serverLevel, this, direction.normalize());
+        WitherSkull skull = new WitherSkull(serverLevel, this, direction.x, direction.y, direction.z);
         serverLevel.addFreshEntity(skull);
 
         serverLevel.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.WITHER_SHOOT,
@@ -337,13 +320,7 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
         }
     }
 
-    /** Three wither heads per wing, matching the model. */
-    private static final int WITHER_HEADS_PER_WING = 3;
-
     // --- ranged attacks -----------------------------------------------------
-
-    /** Aim jitter, in blocks, of an ordinary side arm shot. */
-    private static final double SIDE_ARM_SPREAD = 0.16D;
 
     /**
      * 平时（非俯冲）的常驻射击：一发闪电苦力怕头颅。
@@ -370,10 +347,6 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
 
     /**
      * One lightning creeper skull.
-     *
-     * <p>Uses the inherited {@link #newSkull} factory, so these are exactly the same
-     * {@code LightningCreeperSkullProjectile} mob4 fires - including the charged overlay - rather than a
-     * new projectile type.
      *
      * @param spread aim jitter in blocks; 0 fires dead centre.
      */
@@ -412,7 +385,7 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
         if (direction.lengthSqr() < 1.0E-4D) {
             return;
         }
-        serverLevel.addFreshEntity(new DragonFireball(serverLevel, this, direction.normalize()));
+        serverLevel.addFreshEntity(new DragonFireball(serverLevel, this, direction.x, direction.y, direction.z));
     }
 
     // --- sonic boom ---------------------------------------------------------
@@ -420,7 +393,7 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
     /**
      * The warden's sonic boom, reimplemented from {@code SonicBoom} with its numbers copied verbatim:
      * a line of {@code SONIC_BOOM} particles from the chest to the target, the warden's boom sound,
-     * 10 damage through {@code DamageSources#sonicBoom}, and the warden's knockback on top.
+     * 10 damage through the sonic boom damage source, and the warden's knockback on top.
      *
      * <p>Only the source point differs: the warden reads a chest attachment that this entity type does
      * not have, so the boss fires from its head height instead.
@@ -445,11 +418,11 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
 
         serverLevel.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.WARDEN_SONIC_BOOM,
                 SoundSource.HOSTILE, 3.0F, 1.0F);
-        if (target.hurtServer(serverLevel, serverLevel.damageSources().sonicBoom(this), SONIC_BOOM_DAMAGE)) {
+        if (target.hurt(serverLevel.damageSources().sonicBoom(this), SONIC_BOOM_DAMAGE)) {
             double resistance = target.getAttributeValue(Attributes.KNOCKBACK_RESISTANCE);
             double vertical = SONIC_BOOM_KNOCKBACK_VERTICAL * (1.0D - resistance);
             double horizontal = SONIC_BOOM_KNOCKBACK_HORIZONTAL * (1.0D - resistance);
-            target.push(direction.x() * horizontal, direction.y() * vertical, direction.z() * horizontal);
+            target.push(direction.x * horizontal, direction.y * vertical, direction.z * horizontal);
         }
     }
 
@@ -578,22 +551,22 @@ public class BossLightningCreeperPhantomKnightEntity extends LightningCreeperPha
     }
 
     /**
-     * Releases the rider when the boss dies, exactly like the knight variant: the baby zombie drops off
-     * as an ordinary mob rather than vanishing with its mount.
+     * Releases the rider when the boss dies: the baby zombie drops off as an ordinary mob rather than
+     * vanishing with its mount.
      */
     @Override
     public void die(DamageSource source) {
         if (!this.level().isClientSide()) {
-            Zombie current = this.rider;
+            Zombie current = this.knightRider();
             if (current != null && current.isAlive()) {
                 PhantomRider.release(current);
             }
-            this.rider = null;
+            this.setRider(null);
         }
         super.die(source);
     }
 
-    /** The boss never rolls the small knight variant: it always carries its own trident rider. */
+    /** The boss always carries its own trident rider; the small knight variant does not exist here. */
     @Override
     protected boolean supportsKnightVariant() {
         return false;

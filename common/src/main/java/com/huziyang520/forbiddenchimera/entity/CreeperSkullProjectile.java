@@ -5,25 +5,31 @@ import com.huziyang520.forbiddenchimera.world.ChimeraExplosion;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.projectile.AbstractHurtingProjectile;
 import net.minecraft.world.entity.projectile.ItemSupplier;
-import net.minecraft.world.entity.projectile.hurtingprojectile.AbstractHurtingProjectile;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Explosive creeper skull fired by the Creeper Phantom.
  *
  * <p>Homing is intentionally weak: every tick the current velocity is blended a little towards the
  * shooter's target, so the skull corrects but can still be dodged.
+ *
+ * <p><b>Porting notes from 26.3.</b> The modern superclass lives in
+ * {@code net.minecraft.world.entity.projectile.hurtingprojectile} and takes a direction vector; in
+ * 1.20.1 {@link AbstractHurtingProjectile} is in {@code ...entity.projectile} and its constructor takes
+ * the three power components. The direction is therefore decomposed into power here, and the rotation is
+ * set explicitly exactly as before.
  */
 public class CreeperSkullProjectile extends AbstractHurtingProjectile implements ItemSupplier {
 
@@ -33,8 +39,7 @@ public class CreeperSkullProjectile extends AbstractHurtingProjectile implements
 
     public CreeperSkullProjectile(EntityType<? extends CreeperSkullProjectile> type, LivingEntity owner,
                                   Vec3 direction, Level level) {
-        super(type, owner, direction, level);
-        this.accelerationPower = 0.05D;
+        super(type, owner, direction.x, direction.y, direction.z, level);
         // The parent constructor copies the SHOOTER's rotation onto the missile, which leaves the head
         // pointing wherever the phantom happened to be facing. Face the flight direction instead, so the
         // head is aimed at the player from the very first frame - and start the previous-rotation fields
@@ -45,24 +50,33 @@ public class CreeperSkullProjectile extends AbstractHurtingProjectile implements
     }
 
     /**
-     * Points the missile along {@code direction}, using the vanilla convention for projectile rotation
-     * ({@code Projectile#shoot}): yaw measured from +X minus 90, pitch from the vertical component.
+     * Points the missile along {@code direction}, using the vanilla 1.20.1 convention for projectile
+     * rotation.
+     *
+     * <p><b>Version difference worth flagging.</b> 1.20.1's {@code Projectile#shoot} sets
+     * {@code yRot = atan2(x, z) * 180/PI} and {@code xRot = atan2(y, horizontalDistance) * 180/PI} -
+     * there is no {@code -90} offset and the pitch is not negated. (26.3 changed this convention, which
+     * is why the ported maths looks different from the original source.) These are the numbers that make
+     * the head face along its velocity here, and {@code yRotO}/{@code xRotO} are set to match so the
+     * client does not interpolate the head round on spawn.
      */
     private void faceDirection(Vec3 direction) {
-        double horizontal = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
+        double horizontal = direction.horizontalDistance();
         if (horizontal < 1.0E-4D && Math.abs(direction.y) < 1.0E-4D) {
             return;
         }
-        this.setYRot((float) (Math.atan2(direction.z, direction.x) * (180.0D / Math.PI)) - 90.0F);
-        this.setXRot((float) (-(Math.atan2(direction.y, horizontal) * (180.0D / Math.PI))));
+        this.setYRot((float) (Mth.atan2(direction.x, direction.z) * (180.0D / Math.PI)));
+        this.setXRot((float) (Mth.atan2(direction.y, horizontal) * (180.0D / Math.PI)));
     }
 
-    @Override
-    protected ClipContext.Block getClipType() {
-        return ClipContext.Block.COLLIDER;
-    }
-
-    /** A creeper skull should not catch fire mid flight. */
+    /**
+     * A creeper skull should not catch fire mid flight.
+     *
+     * <p>Note there is no {@code getClipType} override: 1.20.1's {@code Projectile} has no such hook -
+     * collision is resolved inside {@code Projectile#tick} via {@code ProjectileUtil}, and
+     * {@code AbstractHurtingProjectile} already collides with blocks and entities the way a vanilla
+     * wither skull does. The modern override existed to opt into the same behaviour explicitly.
+     */
     @Override
     protected boolean shouldBurn() {
         return false;
@@ -90,7 +104,7 @@ public class CreeperSkullProjectile extends AbstractHurtingProjectile implements
         return (float) ForbiddenChimeraConfig.get().skullOwnerDamageFactor;
     }
 
-    /** Rendered as a creeper head through {@code ThrownItemRenderer}. */
+    /** Rendered as a creeper head through the skull renderer. */
     @Override
     public ItemStack getItem() {
         return new ItemStack(Items.CREEPER_HEAD);
@@ -167,8 +181,8 @@ public class CreeperSkullProjectile extends AbstractHurtingProjectile implements
     }
 
     /**
-     * {@code Projectile#hitTargetOrDeflectSelf} routes both entity and block impacts through
-     * {@code onHit}, so overriding this single hook covers every way the skull can land.
+     * {@code Projectile#onHit} routes both entity and block impacts, so overriding this single hook
+     * covers every way the skull can land.
      */
     @Override
     protected void onHit(HitResult hitResult) {

@@ -2,14 +2,14 @@ package com.huziyang520.forbiddenchimera.entity;
 
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Creeper;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Everything a vanilla phantom needs to play a chimera role, added by {@code PhantomMixin}.
  *
  * <p>The rider and thrower are <b>not</b> registered entity types: they are genuine vanilla phantoms
  * carrying a genuine vanilla creeper, and this interface is the whole custom surface. Steering is
- * shared with the real chimera (mob3) through {@code ChimeraSteering}.
+ * shared with the real chimeras through {@code ChimeraSteering}.
  */
 public interface ChimeraPhantom {
 

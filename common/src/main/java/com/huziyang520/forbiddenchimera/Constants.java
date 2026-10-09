@@ -1,13 +1,15 @@
 package com.huziyang520.forbiddenchimera;
 
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Shared constants for Forbidden Chimera. Keep {@link #MOD_ID} in sync with
- * {@code mod_id} in gradle.properties, with the {@code assets/<mod_id>} folder and with the
- * {@code data/<mod_id>} folder.
+ * Shared constants for Forbidden Chimera. Keep {@link #MOD_ID} in sync with the
+ * {@code assets/<mod_id>} and {@code data/<mod_id>} folders.
+ *
+ * <p>Ported from the 26.3 multi-loader source. The only change is the id type: 1.20.1 calls it
+ * {@link ResourceLocation}, and {@code Identifier} does not exist yet.
  */
 public final class Constants {
 
@@ -19,7 +21,7 @@ public final class Constants {
     }
 
     /** Builds a namespaced id inside this mod's namespace. */
-    public static Identifier id(String path) {
-        return Identifier.fromNamespaceAndPath(MOD_ID, path);
+    public static ResourceLocation id(String path) {
+        return new ResourceLocation(MOD_ID, path);
     }
 }

@@ -3,8 +3,8 @@ package com.huziyang520.forbiddenchimera.ai;
 /**
  * How a chimera steers itself towards a point.
  *
- * <p>The three chimeras use different movement backends: the vanilla phantom based ones only react to
- * their private {@code moveTargetPoint} (see {@code PhantomAccessor}), while the Creeper Phantom uses a
+ * <p>The chimeras use different movement backends: the vanilla phantom based ones only react to their
+ * private {@code moveTargetPoint} (see {@code PhantomAccessor}), while the registered chimeras use a
  * plain flying move control. Goals must go through this interface instead of touching the move control
  * directly, otherwise steering silently does nothing on one of the backends.
  */

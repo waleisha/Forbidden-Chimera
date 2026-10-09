@@ -13,7 +13,7 @@ import net.minecraft.world.phys.Vec3;
 /**
  * The boss's entire attack cycle, in one goal.
  *
- * <p>Why one goal: the boss's moves are a <b>sequence</b>, not competing options. Footballing them into
+ * <p>Why one goal: the boss's moves are a <b>sequence</b>, not competing options. Splitting them into
  * separate goals would need priority games to keep them from overlapping, and every transition would be
  * at the mercy of goal re-evaluation. A single state machine makes the order explicit and gives each
  * animation a defined window.
@@ -32,13 +32,8 @@ import net.minecraft.world.phys.Vec3;
  * </ol>
  *
  * <p>The <b>lightning</b> skulls are <b>not</b> here: they are the boss's continuous side arm on their
- * own cooldown, fired from the entity tick (see {@code Boss...Entity#tick}), suppressed while diving so
- * the charge stays readable. What this goal runs is the <b>burst</b>: the 凋灵之手 salvo.
- *
- * <p>Timings are in server ticks and drive the effects; the client animation only mirrors the synced
- * state. The {@code dragon_breath} window in particular is anchored to the <b>asset</b>: the clip holds
- * the jaws open from 0.35 s to 1.6 s, so shots start at <code>bossDragonBreathFirstTick</code> (7) and
- * are spaced by <code>bossDragonBreathIntervalTicks</code>.
+ * own cooldown, fired from the entity tick, suppressed while diving so the charge stays readable. What
+ * this goal runs is the <b>burst</b>: the 凋灵之手 salvo.
  */
 public class BossAttackGoal extends Goal {
 
@@ -66,8 +61,8 @@ public class BossAttackGoal extends Goal {
     private static final int SALVO_FIRST_TICK = 6;
     /**
      * Phase lengths, in ticks. These are the animation-driven floors and stay put (the clips are 2 s
-     * long); the cycle was shortened by {@code bossOrbitTicks} and the two "filler" windows below, on
-     * 2026-09-26, because the player reported every move except the lightning side arm as too rare.
+     * long); the cycle was shortened by {@code bossOrbitTicks} and the two "filler" windows below,
+     * because the player reported every move except the lightning side arm as too rare.
      */
     private static final int SALVO_TICKS = 20;
     private static final int DRAGON_BREATH_TICKS = 40;
@@ -79,9 +74,9 @@ public class BossAttackGoal extends Goal {
      * 宽限判断最多把 orbit 延长这么多 tick。
      *
      * <p>存在的理由：{@code sideArmAge} 会被下一发侧臂射击清零，所以当
-     * {@code bossSideArmDiveGraceTicks} 大于 {@code bossSideArmCooldownTicks}（或者配成了负数以外的
-     * 极端值）时，"等年龄涨到宽限值"这件事永远不会发生。没有这个上限，首领就会永远停在 orbit，
-     * 火箭/俯冲/音波整条链都进不去。超时后照常放行，宽限只是"尽量等"，不是"必须等到"。
+     * {@code bossSideArmDiveGraceTicks} 大于 {@code bossSideArmCooldownTicks} 时，"等年龄涨到宽限值"
+     * 这件事永远不会发生。没有这个上限，首领就会永远停在 orbit，火箭/俯冲/音波整条链都进不去。
+     * 超时后照常放行，宽限只是"尽量等"，不是"必须等到"。
      */
     private static final int GRACE_MAX_DEFER_TICKS = 60;
 
@@ -93,13 +88,7 @@ public class BossAttackGoal extends Goal {
     private int shotsFired;
     /** True once the sonic boom of this phase has gone off. */
     private boolean sonicBoomFired;
-    /**
-     * 侧臂射击宽限已经连续推迟了多少 tick。
-     *
-     * <p>用 {@link #GRACE_MAX_DEFER_TICKS} 兜底，保证"等宽限"永远不会变成死循环：只要
-     * {@code bossSideArmDiveGraceTicks} 被配成大于 {@code bossSideArmCooldownTicks}，
-     * {@code sideArmAge} 就会在到达宽限值之前被下一发侧臂射击清零，单靠年龄判断永远等不到。
-     */
+    /** 侧臂射击宽限已经连续推迟了多少 tick。 */
     private int graceDeferTicks;
     /**
      * The orbit's zero point, re-anchored every time the boss returns to orbiting (see {@link #enterOrbit}).
@@ -208,7 +197,7 @@ public class BossAttackGoal extends Goal {
      *
      * <p>不会变成死循环：{@code sideArmAge} 会被下一发侧臂射击清零，当宽限值大于侧臂间隔时永远等不到，
      * 所以推迟次数由 {@link #GRACE_MAX_DEFER_TICKS} 封顶，超限就直接放行。计数只在真正放行时清零，
-     * 所以跨阶段（orbit → special → rocket）也是同一个预算，整体有界。
+     * 所以跨阶段（orbit -> special -> rocket）也是同一个预算，整体有界。
      *
      * @return true 表示这次应该继续留在当前阶段，false 表示宽限已满足（或已等够），可以往下走
      */
@@ -341,7 +330,7 @@ public class BossAttackGoal extends Goal {
             // The rider delivers the hit through the vanilla weapon pipeline (trident included); if it
             // is already dead the boss still slams.
             if (!this.mob.riderStrike(serverLevel, target)) {
-                this.mob.doHurtTarget(serverLevel, target);
+                this.mob.doHurtTarget(target);
             }
             this.mob.playSound(SoundEvents.PHANTOM_SWOOP, 2.0F, 0.6F);
             this.enterPassBy();

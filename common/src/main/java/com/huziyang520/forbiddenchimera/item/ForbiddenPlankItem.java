@@ -7,12 +7,12 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.ItemUseAnimation;
+import net.minecraft.world.item.UseAnim;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
@@ -28,8 +28,11 @@ import net.minecraft.world.phys.Vec3;
  * chest.
  *
  * <p>The item is <b>consumed</b> on a successful summon, like a spawn egg: the recipe costs a dragon
- * head, so an unlimited use item would be a permanent boss on demand. This is a design choice, not a
- * vanilla rule, and is recorded in the project decision log.
+ * head, so an unlimited use item would be a permanent boss on demand.
+ *
+ * <p><b>Porting note.</b> 26.3's {@code InteractionResult} is a rich result type and the use methods
+ * take a level first; in 1.20.1 {@code Item#use} returns an {@link InteractionResultHolder} and
+ * {@code getUseDuration} takes only the stack.
  */
 public class ForbiddenPlankItem extends Item {
 
@@ -38,7 +41,7 @@ public class ForbiddenPlankItem extends Item {
     /** How far in front of the player the summon point is looked for, in blocks. */
     private static final double SUMMON_RANGE = 10.0D;
 
-    public ForbiddenPlankItem(Item.Properties properties) {
+    public ForbiddenPlankItem(Properties properties) {
         super(properties);
     }
 
@@ -58,21 +61,21 @@ public class ForbiddenPlankItem extends Item {
 
     /** Same as {@link #useOn}: using it in empty air starts the same hold. */
     @Override
-    public InteractionResult use(Level level, Player player, InteractionHand hand) {
+    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         player.startUsingItem(hand);
-        return InteractionResult.CONSUME;
+        return InteractionResultHolder.consume(player.getItemInHand(hand));
     }
 
     /** The "long press" itself. */
     @Override
-    public int getUseDuration(ItemStack stack, LivingEntity entity) {
+    public int getUseDuration(ItemStack stack) {
         return SUMMON_TICKS;
     }
 
     /** The bow pose reads clearly as "charging something up" and exists in vanilla. */
     @Override
-    public ItemUseAnimation getUseAnimation(ItemStack stack) {
-        return ItemUseAnimation.BOW;
+    public UseAnim getUseAnimation(ItemStack stack) {
+        return UseAnim.BOW;
     }
 
     /** The hold completed: find the aim point and put the boss there. */
@@ -84,20 +87,21 @@ public class ForbiddenPlankItem extends Item {
 
         Vec3 target = this.aimPoint(player);
         BossLightningCreeperPhantomKnightEntity boss =
-                ModEntities.bossLightningCreeperPhantomKnight()
-                        .create(serverLevel, EntitySpawnReason.MOB_SUMMONED);
+                ModEntities.BOSS.get().create(serverLevel);
         if (boss == null) {
             return stack;
         }
 
-        boss.snapTo(target.x, target.y, target.z, player.getYRot(), 0.0F);
+        boss.moveTo(target.x, target.y, target.z, player.getYRot(), 0.0F);
         // A summoned boss must not be despawned by the distance check; it is an encounter, not a spawn.
         boss.setPersistenceRequired();
         serverLevel.addFreshEntity(boss);
 
         serverLevel.playSound(null, target.x, target.y, target.z, SoundEvents.WITHER_SPAWN,
                 SoundSource.HOSTILE, 4.0F, 1.0F);
-        stack.consume(1, player);
+        if (!player.getAbilities().instabuild) {
+            stack.shrink(1);
+        }
         return stack;
     }
 

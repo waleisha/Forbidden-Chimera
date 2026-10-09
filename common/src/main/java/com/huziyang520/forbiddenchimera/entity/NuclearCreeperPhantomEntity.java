@@ -1,18 +1,18 @@
 package com.huziyang520.forbiddenchimera.entity;
 
-import com.geckolib.animatable.manager.AnimatableManager;
-import com.geckolib.animation.AnimationController;
-import com.geckolib.animation.RawAnimation;
-import com.geckolib.animation.object.PlayState;
-import com.geckolib.animation.state.AnimationTest;
 import com.huziyang520.forbiddenchimera.ai.NuclearAttackGoal;
 import com.huziyang520.forbiddenchimera.config.ForbiddenChimeraConfig;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.Level;
+import software.bernie.geckolib.core.animation.AnimationController;
+import software.bernie.geckolib.core.animation.AnimatableManager;
+import software.bernie.geckolib.core.animation.RawAnimation;
+import software.bernie.geckolib.core.object.PlayState;
 
 /**
  * 核弹苦力怕幻翼 - the third model based chimera.
@@ -55,14 +55,14 @@ public class NuclearCreeperPhantomEntity extends CreeperPhantomEntity {
     public NuclearCreeperPhantomEntity(EntityType<? extends NuclearCreeperPhantomEntity> type, Level level) {
         super(type, level);
         this.xpReward = 15;
-        this.mainController = new AnimationController<>("main", 4, this::selectAnimation);
+        this.mainController = new AnimationController<>(this, "main", 4, this::selectAnimation);
     }
 
     @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        super.defineSynchedData(builder);
-        builder.define(DATA_NUCLEAR_PHASE, PHASE_FLY);
-        builder.define(DATA_HOVER_TICKS, 0);
+    protected void defineSynchedData() {
+        super.defineSynchedData();
+        this.entityData.define(DATA_NUCLEAR_PHASE, PHASE_FLY);
+        this.entityData.define(DATA_HOVER_TICKS, 0);
     }
 
     /** Replaces the parent's controller entirely: this variant has its own animations. */
@@ -71,8 +71,9 @@ public class NuclearCreeperPhantomEntity extends CreeperPhantomEntity {
         controllers.add(this.mainController);
     }
 
-    private PlayState selectAnimation(AnimationTest<NuclearCreeperPhantomEntity> state) {
-        NuclearCreeperPhantomEntity entity = state.animatable();
+    private PlayState selectAnimation(
+            software.bernie.geckolib.core.animation.AnimationState<NuclearCreeperPhantomEntity> state) {
+        NuclearCreeperPhantomEntity entity = state.getAnimatable();
         switch (entity.nuclearPhase()) {
             case PHASE_DETONATE -> {
                 this.mainController.setAnimationSpeed(1.0D);
@@ -106,32 +107,26 @@ public class NuclearCreeperPhantomEntity extends CreeperPhantomEntity {
         return new NuclearAttackGoal(this);
     }
 
-    /** The spear variant is defined for the diving creeper chimeras (mob3 / mob4), not the bomb. */
-    @Override
-    protected boolean supportsSpearVariant() {
-        return false;
-    }
-
-    /** Neither variant applies to the bomb: a rider would be incinerated, and it never dives. */
+    /** The spear variant is defined for the diving creeper chimeras, not the bomb. */
     @Override
     protected boolean supportsKnightVariant() {
         return false;
     }
 
     public int nuclearPhase() {
-        return this.getEntityData().get(DATA_NUCLEAR_PHASE);
+        return this.entityData.get(DATA_NUCLEAR_PHASE);
     }
 
     public void setNuclearPhase(int phase) {
-        this.getEntityData().set(DATA_NUCLEAR_PHASE, phase);
+        this.entityData.set(DATA_NUCLEAR_PHASE, phase);
     }
 
     /** Ticks spent hovering so far; drives the wing flap ramp on the client. */
     public int hoverTicks() {
-        return this.getEntityData().get(DATA_HOVER_TICKS);
+        return this.entityData.get(DATA_HOVER_TICKS);
     }
 
     public void setHoverTicks(int ticks) {
-        this.getEntityData().set(DATA_HOVER_TICKS, ticks);
+        this.entityData.set(DATA_HOVER_TICKS, ticks);
     }
 }

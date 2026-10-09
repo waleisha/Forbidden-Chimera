@@ -1,39 +1,31 @@
 package com.huziyang520.forbiddenchimera.world;
 
 import com.huziyang520.forbiddenchimera.config.ForbiddenChimeraConfig;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.Explosion;
 import net.minecraft.world.level.ExplosionDamageCalculator;
 import net.minecraft.world.level.Level;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The single place where "low power, destroys terrain, 100% of blocks drop" is implemented.
  *
- * <p>Probed directly against the Minecraft 26.3 decompiled sources before writing this:
- * <ul>
- *   <li>{@code Explosion} is now an <b>interface</b> ({@code net.minecraft.world.level.Explosion}),
- *       implemented by {@code ServerExplosion}. The old {@code BlockInteraction} constants live inside
- *       that interface.</li>
- *   <li>{@code ServerExplosion#interactWithBlocks} calls
- *       {@code BlockState#onExplosionHit(...)}, whose default implementation drops loot whenever
- *       {@code Block#dropFromExplosion} returns true.</li>
- *   <li>{@code Block#dropFromExplosion} <b>defaults to {@code true}</b>, and the old
- *       {@code survives_explosion} loot condition no longer exists in 26.3.</li>
- *   <li>{@code ServerLevel} maps {@code ExplosionInteraction.BLOCK} to
- *       {@code Explosion.BlockInteraction.DESTROY} (only downgraded to {@code DESTROY_WITH_DECAY},
- *       which merely attaches an otherwise unused loot parameter, when the
- *       {@code block_explosion_drop_decay} game rule is on).</li>
- * </ul>
+ * <p>A plain {@link Level.ExplosionInteraction#BLOCK} explosion satisfies all three requirements in
+ * 1.20.1, so this class deliberately stays a thin, documented wrapper.
  *
- * <p>Conclusion: a plain {@link Level.ExplosionInteraction#BLOCK} explosion already satisfies all three
- * requirements. Writing our own block iteration would duplicate vanilla work and risk double drops, so
- * this class deliberately stays a thin, documented wrapper.
+ * <p>{@code BLOCK} is used instead of {@code MOB} on purpose: {@code MOB} explosions are disabled when
+ * the {@code mobGriefing} game rule is off, but a thrown explosive skull should always scar the terrain.
  *
- * <p>Note that {@code ExplosionInteraction.BLOCK} is used instead of {@code MOB} on purpose:
- * {@code MOB} explosions are disabled when the {@code mobGriefing} game rule is off, but a thrown
- * explosive skull should always scar the terrain.
+ * <p><b>Porting note - the biggest behavioural difference in this file.</b> In 26.3 the per-entity blast
+ * scaling came from overriding
+ * {@code ExplosionDamageCalculator#getEntityDamageAmount(Explosion, Entity, float)}. That hook does
+ * <b>not</b> exist in 1.20.1: the calculator here only decides block resistance and whether a block
+ * explodes, while entity damage is computed inside {@code Explosion#finalizeExplosion} with no
+ * extension point. The two reductions this mod needs - the shooter barely hurting itself, and a rider
+ * being spared by its own mount - are therefore applied by {@code ChimeraExplosionProtection} (forge
+ * module) through Forge's {@code LivingHurtEvent}, reading the markers published by {@link Scope}.
  */
 public final class ChimeraExplosion {
 
@@ -60,7 +52,7 @@ public final class ChimeraExplosion {
      * <p>This is how the Creeper Phantom survives its own missiles: the skull is a child of the mob, so
      * without this the blast would hit the shooter with full force.
      *
-     * @param protectedEntity     entity that takes reduced damage, usually the shooter.
+     * @param protectedEntity       entity that takes reduced damage, usually the shooter.
      * @param protectedEntityFactor damage multiplier for that entity, 0.1 means a 90% reduction.
      */
     public static void explode(ServerLevel level, @Nullable Entity source, @Nullable Entity protectedEntity,
@@ -73,11 +65,11 @@ public final class ChimeraExplosion {
      * {@link #explode(ServerLevel, Entity, Entity, double, double, double, float, float)} with an explicit
      * factor for the protected entity's <b>riders</b>.
      *
-     * <p>This is what keeps a knight's or the boss's baby zombie from being killed by its own mount's
-     * blast: the rider is a passenger of the shooter, so it is inside every explosion the mount makes and
-     * would otherwise take full damage. It is deliberately expressed as "whoever rides the protected
-     * entity" rather than by checking the ownership tag, so it works for any future carried passenger and
-     * needs no mixin on the vanilla zombie.
+     * <p>This is what keeps the boss's baby zombie from being killed by its own mount's blast: the rider
+     * is a passenger of the shooter, so it is inside every explosion the mount makes and would otherwise
+     * take full damage. It is deliberately expressed as "whoever rides the protected entity" rather than
+     * by checking the ownership tag, so it works for any future carried passenger and needs no mixin on
+     * the vanilla zombie.
      *
      * @param riderFactor damage multiplier for the protected entity's passengers, 0.1 means 90% off.
      */
@@ -88,42 +80,65 @@ public final class ChimeraExplosion {
             return;
         }
 
-        ExplosionDamageCalculator calculator = protectedEntity == null
-                ? null
-                : new ReducedEntityDamageCalculator(protectedEntity, protectedEntityFactor, riderFactor);
-
-        // A null damage source makes vanilla build the usual explosion damage source from `source`.
-        level.explode(source, null, calculator, x, y, z, radius, false, Level.ExplosionInteraction.BLOCK);
+        // An explosion resolves its entity damage synchronously inside this call, so the protection only
+        // has to be visible for the duration of it. The scope publishes the markers on the way in and
+        // removes them in a finally, which is also what keeps a throwing explosion from leaking them.
+        try (Scope ignored = Scope.open(source, protectedEntity, protectedEntityFactor, riderFactor)) {
+            // A null damage source makes vanilla build the usual explosion damage source from `source`.
+            level.explode(source, null, (ExplosionDamageCalculator) null, x, y, z, radius, false,
+                    Level.ExplosionInteraction.BLOCK);
+        }
     }
 
     /**
-     * Scales the blast damage taken by the protected entity and by anyone riding it, leaving the vanilla
-     * maths untouched.
+     * The entity that should survive its own blast, and by how much.
+     *
+     * <p>Published rather than passed because {@code Explosion} gives the damage handler no way to know
+     * who fired it: by the time {@code LivingHurtEvent} runs, the only link back to the shooter is the
+     * damage source's owning entity, which is exactly the key used to look this up.
      */
-    private static final class ReducedEntityDamageCalculator extends ExplosionDamageCalculator {
+    public record Protection(Entity protectedEntity, float entityFactor, float riderFactor) {
+    }
 
-        private final Entity protectedEntity;
-        private final float factor;
-        private final float riderFactor;
+    /**
+     * Publishes blast protection for exactly as long as one explosion is resolving.
+     *
+     * <p>A map keyed by the explosion's source (rather than a single field) is used so that explosions
+     * started from inside another explosion's damage pass cannot silently overwrite each other's
+     * protection. Keys are compared by identity on purpose - the source is a specific entity instance,
+     * and two distinct entities must never share an entry even if they happen to be equal.
+     */
+    public static final class Scope implements AutoCloseable {
 
-        private ReducedEntityDamageCalculator(Entity protectedEntity, float factor, float riderFactor) {
-            this.protectedEntity = protectedEntity;
-            this.factor = factor;
-            this.riderFactor = riderFactor;
+        private static final Map<Entity, Protection> ACTIVE = new IdentityHashMap<>();
+
+        private final @Nullable Entity source;
+
+        private Scope(@Nullable Entity source) {
+            this.source = source;
+        }
+
+        private static Scope open(@Nullable Entity source, @Nullable Entity protectedEntity,
+                                  float entityFactor, float riderFactor) {
+            if (source != null && protectedEntity != null) {
+                ACTIVE.put(source, new Protection(protectedEntity, entityFactor, riderFactor));
+            }
+            return new Scope(source);
+        }
+
+        /**
+         * @param source the damage source's owning entity.
+         * @return the protection registered for this explosion source, or {@code null}.
+         */
+        public static @Nullable Protection find(@Nullable Entity source) {
+            return source == null ? null : ACTIVE.get(source);
         }
 
         @Override
-        public float getEntityDamageAmount(Explosion explosion, Entity entity, float exposure) {
-            float damage = super.getEntityDamageAmount(explosion, entity, exposure);
-            if (entity == this.protectedEntity) {
-                return damage * this.factor;
+        public void close() {
+            if (this.source != null) {
+                ACTIVE.remove(this.source);
             }
-            // getRootVehicle is the mount itself for a passenger, and the entity itself otherwise, so this
-            // matches direct and nested riders alike without walking the vehicle chain by hand.
-            if (entity.getRootVehicle() == this.protectedEntity) {
-                return damage * this.riderFactor;
-            }
-            return damage;
         }
     }
 }

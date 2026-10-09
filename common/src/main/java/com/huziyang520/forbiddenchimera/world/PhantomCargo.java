@@ -5,11 +5,11 @@ import com.huziyang520.forbiddenchimera.entity.ChimeraVariant;
 import java.util.List;
 import java.util.UUID;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.EntitySpawnReason;
-import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Phantom;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The creeper a phantom chimera carries: spawning, ownership, anchoring, releasing.
@@ -29,6 +29,15 @@ import org.jspecify.annotations.Nullable;
  * <h2>Geometry</h2>
  * The carry heights are <b>derived constants</b>, not config values: a stale config value would
  * silently misalign the creeper. See {@link #RIDER_CARRY_HEIGHT} / {@link #THROWER_CARRY_HEIGHT}.
+ *
+ * <p><b>Porting notes.</b> Two 26.3 APIs are gone:
+ * <ul>
+ *   <li>{@code EntityType#create(ServerLevel, EntitySpawnReason)} became
+ *       {@code EntityType#create(Level)} in 1.20.1, so the spawn reason is no longer passed at
+ *       creation - {@code MOB_SUMMONED} is applied through {@code finalizeSpawn} instead;</li>
+ *   <li>{@code Entity#entityTags()} became {@code Entity#getTags()}, which returns a live view that
+ *       must be copied before removing from it (hence the {@code List.copyOf}).</li>
+ * </ul>
  */
 public final class PhantomCargo {
 
@@ -46,11 +55,10 @@ public final class PhantomCargo {
     /**
      * Vanilla phantom model band above the phantom's feet, in blocks.
      *
-     * <p>Derivation (26.3 {@code LivingEntityRenderer#submit} + {@code PhantomRenderer#scale}):
-     * the model transform ends with {@code translate(0, -1.501, 0)} and the phantom renderer
-     * contributes {@code +1.3125} before it, and the model itself spans -0.125 .. +0.125 around its
-     * origin, so the band is {@code 1.501 - 1.3125 ± 0.125} = 0.0635 .. 0.3135 - inside the
-     * phantom's 0.5 tall hitbox.
+     * <p>Derivation (the living-entity model transform ends with {@code translate(0, -1.501, 0)} and the
+     * phantom renderer contributes {@code +1.3125} before it, and the model itself spans -0.125 ..
+     * +0.125 around its origin):
+     * {@code 1.501 - 1.3125 ± 0.125} = 0.0635 .. 0.3135 - inside the phantom's 0.5 tall hitbox.
      */
     public static final double MODEL_BAND_BOTTOM = 0.0635D;
     public static final double MODEL_BAND_TOP = 0.3135D;
@@ -79,7 +87,7 @@ public final class PhantomCargo {
 
     /** Spawns a new limp creeper owned by the phantom: no AI, no gravity, never despawns. */
     public static @Nullable Creeper spawn(ServerLevel level, Phantom phantom) {
-        Creeper creeper = EntityTypes.CREEPER.create(level, EntitySpawnReason.MOB_SUMMONED);
+        Creeper creeper = EntityType.CREEPER.create(level);
         if (creeper == null) {
             return null;
         }
@@ -95,12 +103,12 @@ public final class PhantomCargo {
     /** Re-anchors the cargo at its variant's offset. Called every tick while the phantom lives. */
     public static void anchor(Phantom phantom, Creeper cargo, ChimeraVariant variant) {
         if (variant == ChimeraVariant.RIDER) {
-            cargo.snapTo(phantom.getX(), phantom.getY() + RIDER_CARRY_HEIGHT, phantom.getZ(),
+            cargo.moveTo(phantom.getX(), phantom.getY() + RIDER_CARRY_HEIGHT, phantom.getZ(),
                     phantom.getYRot(), 0.0F);
         } else {
             // Small pendulum so the hanging creeper does not look welded to the phantom.
             double sway = Math.sin(phantom.tickCount * 0.15D) * 0.12D;
-            cargo.snapTo(phantom.getX() + sway, phantom.getY() + THROWER_CARRY_HEIGHT,
+            cargo.moveTo(phantom.getX() + sway, phantom.getY() + THROWER_CARRY_HEIGHT,
                     phantom.getZ(), phantom.getYRot(), 0.0F);
         }
     }
@@ -111,8 +119,9 @@ public final class PhantomCargo {
      * the phantom dies - "the survivor carries on with vanilla AI".
      */
     public static void release(Creeper creeper) {
-        // 26.3 exposes the persistent tag set through entityTags(); copy before removing.
-        creeper.entityTags().stream().filter(tag -> tag.startsWith(TAG_PREFIX)).toList()
+        // getTags() returns a live view of the tag set, so it is copied before removing from it.
+        List.copyOf(creeper.getTags()).stream()
+                .filter(tag -> tag.startsWith(TAG_PREFIX))
                 .forEach(creeper::removeTag);
         creeper.setNoAi(false);
         creeper.setNoGravity(false);
@@ -139,7 +148,7 @@ public final class PhantomCargo {
         String tag = tagFor(phantom);
         return phantom.level().getEntitiesOfClass(Creeper.class,
                 phantom.getBoundingBox().inflate(SEARCH_RADIUS),
-                candidate -> candidate.entityTags().contains(tag));
+                candidate -> candidate.getTags().contains(tag));
     }
 
     private static String tagFor(Phantom phantom) {

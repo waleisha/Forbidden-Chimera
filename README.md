@@ -1,3 +1,20 @@
+> **This branch is the Minecraft 1.20.1 / Forge port.**
+>
+> It is a separate line from the `26.3` branch, which targets the Fabric + NeoForge multi-loader
+> setup. The two share the same design and gameplay, with three deliberate differences on this
+> branch, all forced by what 1.20.1 has:
+>
+> * **The spear and knight variants do not exist here.** 1.20.1 has no spears, no mace, and no item
+>   components (`DataComponents` / `KineticWeapon`), which is what both variants were built on.
+> * **Two spawn eggs are custom items.** The rider and thrower chimeras are not registered entity
+>   types - they are vanilla phantoms stamped with a variant - so their eggs are hand written rather
+>   than data driven.
+> * **Client rendering uses GeckoLib 4.x**, whose API differs substantially from the 5.x line the
+>   `26.3` branch uses.
+>
+> Build with `./gradlew build` (Gradle 8.13, Java 17, Forge 1.20.1). The jar lands in
+> `forge/build/libs/`. **GeckoLib 4.x is required at runtime.**
+
 # Forbidden Chimera
 
 Sew a phantom and a creeper together — then let them come looking for you.

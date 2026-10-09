@@ -18,8 +18,15 @@ import java.util.Map;
 /**
  * Plain JSON configuration written to {@code config/forbidden_chimera.json}.
  *
- * <p>Gson is used instead of night-config on purpose: night-config is only shipped by NeoForge, and
- * this class lives in the shared {@code common} module which also has to run on Fabric.
+ * <p>Gson is used rather than Forge's own config system so the file stays identical in shape to the
+ * 26.3 build's: same keys, same defaults, same migration rules. A player moving between the two
+ * Minecraft lines keeps one config format.
+ *
+ * <p><b>Ported subset.</b> The 26.3 build also had a 持矛变体 (spear) and a 骑士变体 (knight) for the
+ * Creeper Phantom. Both are absent here: the spear variant reads the seven vanilla spears' own
+ * {@code kinetic_weapon} component, and the knight variant rides on the mace's smash bonus - and
+ * 1.20.1 has neither spears, nor a mace, nor item components at all. Every {@code *Spear*} and
+ * {@code *Knight*} key is therefore gone rather than silently dead.
  */
 public final class ForbiddenChimeraConfig {
 
@@ -54,28 +61,23 @@ public final class ForbiddenChimeraConfig {
 
     // --- shared behaviour --------------------------------------------------
     /**
-     * Vanilla combat targeting never sees a creative player as an enemy
-     * ({@code Mob#asValidTarget} returns null while invulnerable), so the chimeras look completely passive
-     * when they are tested from creative mode.
+     * Vanilla combat targeting never sees a creative player as an enemy, so the chimeras look
+     * completely passive when they are tested from creative mode.
      *
-     * <p><b>Default is {@code false}</b>（2026-10-06 用户实机回报后翻转，见决策记录 D45）：追赶创造模式玩家是原版行为回归，不是特性，公开发布的模组不该默认这么做。想用创造模式测试嵌合体的攻击性就把它改回 {@code true} —— 这个键存在的唯一理由就是这个。
+     * <p><b>Default is {@code false}</b>：追赶创造模式玩家是原版行为回归，不是特性，公开发布的模组
+     * 不该默认这么做。想用创造模式测试嵌合体的攻击性就把它改回 {@code true}。
      *
-     * <p>Note this only ever applied to the <b>chimeras</b>: a plain vanilla phantom is filtered through
-     * {@link com.huziyang520.forbiddenchimera.ai.ChimeraTargeting#vanillaFilter} and is therefore immune
-     * to this key entirely.
+     * <p>Unlike the 26.3 build this needs no {@code asValidTarget} override to work: 1.20.1's
+     * {@code Mob#setTarget} stores whatever it is handed, so the flag alone decides.
      */
     public boolean attackCreativePlayers = false;
 
     // --- phantom model geometry (read-only facts, kept here as documentation) ----------
     //
-    // Vanilla 26.3 renders every living entity through:
-    //     poseStack.scale(state.scale, ...);
-    //     setupRotations(...);
-    //     poseStack.scale(-1, -1, 1);
-    //     this.scale(state, poseStack);        <- PhantomRenderer translates +1.3125 here
-    //     poseStack.translate(0, -1.501, 0);   <- and this runs afterwards
-    // so the phantom model lands at  1.501 - 1.3125 = +0.1885  (centre), spanning
-    //     +0.0635 .. +0.3135 above the phantom's feet
+    // Vanilla renders every living entity through a model transform that ends with
+    //     translate(0, -1.501, 0)
+    // and the phantom renderer contributes +1.3125 before it, so the phantom model lands at
+    //     1.501 - 1.3125 = +0.1885  (centre), spanning +0.0635 .. +0.3135 above the phantom's feet
     // which is inside its 0.9 x 0.5 hitbox (0 .. 0.5). Vanilla is therefore already aligned: the
     // 1.3125 must NOT be patched, and the carry heights below are tuned against this band.
 
@@ -112,10 +114,6 @@ public final class ForbiddenChimeraConfig {
     public double diverFireMinDistance = 7.0D;
     /**
      * How long a dive run may continue after its single shot before the phantom breaks off.
-     *
-     * <p>This used to be a "pull back to the attack position" hold, which made the phantom fly away
-     * from the player and come back - the player read that loop as the mob circling aimlessly. Now the
-     * phantom simply keeps pressing and passes by the target once, then breaks off.
      */
     public int diverPassByTicks = 40;
     /**
@@ -133,73 +131,7 @@ public final class ForbiddenChimeraConfig {
     /** Ticks spent circling between two dive runs. Higher makes the mob far less relentless. */
     public int diverDiveCooldownTicks = 180;
 
-    // --- 持矛变体 (spear variant, mob3 / mob4) -----------------------------
-    /**
-     * Whether Creeper Phantoms may roll the spear variant at all.
-     *
-     * <p>The variant is a <b>weapon</b> variant, not a separate mob: the chimera keeps its model and
-     * AI, and simply carries one of the seven vanilla spears under a wing. On a dive the contact hit
-     * is then resolved with the spear's own kinetic weapon data instead of the default melee attack.
-     */
-    public boolean enableSpearVariant = true;
-    /** Chance per freshly spawned Creeper Phantom / Lightning Creeper Phantom to carry a spear. */
-    public double spearVariantChance = 0.10D;
-    /**
-     * Extra multiplier applied on top of the spear's own dive damage. Purely a tuning dial: 1.0 means
-     * "exactly what the spear's {@code kinetic_weapon} component says". Never below 0.
-     */
-    public double spearDiveDamageScale = 1.0D;
-
-    // --- 苦力怕幻翼骑士变体 (knight variant, mob3) --------------------------
-    /**
-     * Whether the Creeper Phantom may roll the knight variant at all - a vanilla baby zombie riding on
-     * its back, swinging a mace as the chimera dives.
-     *
-     * <p>Like the spear variant this is a <b>variant</b> of an existing chimera, not a new mob: no new
-     * entity type is registered. The two variants are mutually exclusive - a knight never carries a
-     * spear as well.
-     */
-    public boolean enableKnightVariant = true;
-    /**
-     * Chance per freshly spawned Creeper Phantom to be the knight variant.
-     *
-     * <p>Not fixed by the design plan, which only specifies the behaviour: this is the spawn dial, set
-     * to the same order of magnitude as the spear variant so both show up at a similar rate.
-     */
-    public double knightVariantChance = 0.10D;
-    /**
-     * Base chance the rider rolls armour, replacing vanilla {@code Mob.MAX_WEARING_ARMOR_CHANCE}
-     * (0.15F, still scaled by the local difficulty multiplier exactly like vanilla).
-     */
-    public float knightArmorChance = 0.15F;
-    /** Chance the rider's mace is enchanted on spawn; vanilla weapon value ({@code MAX_ENCHANTED_WEAPON_CHANCE}). */
-    public float knightWeaponEnchantChance = 0.25F;
-    /** Chance each piece of the rider's armour is enchanted on spawn; vanilla armour value. */
-    public float knightArmorEnchantChance = 0.5F;
-    /** How high above the target the knight climbs before committing to the charge. */
-    public double knightClimbHeight = 10.0D;
-    public double knightClimbSpeed = 1.4D;
-    /** Speed of the downward charge. Must be fast: the mace smash depends on the fall. */
-    public double knightChargeSpeed = 2.0D;
-    /** Ticks between two charge attempts. The roll below only happens once per period. */
-    public int knightChargeCooldownTicks = 200;
-    /**
-     * Chance that a charge attempt actually happens once the cooldown expires. Deliberately low: the
-     * knight is a rare event, the mount keeps firing skulls the rest of the time.
-     */
-    public double knightChargeChance = 0.35D;
-    /** A charge that never connects is broken off after this many ticks. */
-    public int knightMaxChargeTicks = 80;
-    /**
-     * Descent the rider needs for the mace smash to count ({@code MaceItem} only adds its fall bonus
-     * above 1.5 blocks). Below this the strike is treated as a plain mace hit.
-     */
-    public double knightSmashMinFallDistance = 1.5D;
-    /**
-     * Whether a dead rider is replaced. Off by default: the design is "whichever of the two dies, the
-     * other carries on", and a knight is a one-off encounter, not a recurring threat.
-     */
-    public boolean knightRespawnRider = false;
+    // --- 骑士/首领骑手 ------------------------------------------------------
     /**
      * 骑士/首领坐骑背上那只幼年僵尸的最大生命值。
      *
@@ -210,11 +142,17 @@ public final class ForbiddenChimeraConfig {
     /**
      * <b>骑在/挂在爆炸源身上的乘客</b>吃爆炸伤害的倍率，0.1 = 减免 90%。
      *
-     * <p>按 {@code ChimeraExplosion} 的实现，它作用于"根载具 == 被保护者"的实体，也就是坐骑背上那只
-     * 幼年僵尸（以及 mob1 吊着的苦力怕）：坐骑自爆时不会顺手把乘客一起带走。与
-     * {@code bossExplosionDamageFactor} 是两回事，那个管的是首领<b>自己</b>吃多少爆炸伤害。
+     * <p>作用于"根载具 == 被保护者"的实体，也就是首领背上那只幼年僵尸（以及 mob1 吊着的苦力怕）：
+     * 坐骑自爆时不会顺手把乘客一起带走。与 {@code bossExplosionDamageFactor} 是两回事，那个管的是
+     * 首领<b>自己</b>吃多少爆炸伤害。
      */
     public double riderExplosionDamageFactor = 0.1D;
+    /** Chance each piece of the boss rider's armour is rolled on spawn, vanilla armour value. */
+    public float riderArmorChance = 0.15F;
+    /** Chance the boss rider's trident is enchanted on spawn; vanilla weapon value. */
+    public float riderWeaponEnchantChance = 0.25F;
+    /** Chance each piece of the rider's armour is enchanted on spawn; vanilla armour value. */
+    public float riderArmorEnchantChance = 0.5F;
 
     // --- 末影人幻翼 (enderman phantom) ------------------------------------
     public boolean enableEndermanPhantom = true;
@@ -287,9 +225,6 @@ public final class ForbiddenChimeraConfig {
     public int bossSideArmCooldownTicks = 60;
     /**
      * 首领发射侧臂头颅后，至少隔这么多 tick 才允许进入火箭俯冲。
-     *
-     * <p>否则侧臂连发和俯冲会叠在同一瞬间：玩家看到的是"贴脸吐头 + 立刻被撞"，两次伤害挨在一起
-     * 就只剩一次可反应的机会。
      */
     public int bossSideArmDiveGraceTicks = 30;
     /** 连发（齐射）里发射多少颗<b>凋灵之手</b>。 */
@@ -346,6 +281,9 @@ public final class ForbiddenChimeraConfig {
     /**
      * Additional group members are rolled exactly like the vanilla phantom
      * ({@code 1 + difficultyId} total), so only the leader's type is weighted.
+     *
+     * <p>1.20.1 gates the whole mechanic behind the {@code doInsomnia} game rule (there is no separate
+     * {@code spawn_phantoms} rule yet), which is what this reads.
      */
     public boolean chimeraSpawnerUsesPhantomGameRule = true;
 
@@ -406,10 +344,11 @@ public final class ForbiddenChimeraConfig {
      * <p>Why this exists: Gson builds the target through {@code Unsafe} and never runs field
      * initialisers, so a key that is <b>missing</b> from the file silently becomes {@code false} /
      * {@code 0} instead of its declared default. Upgrading the mod then looks like "the new feature is
-     * broken" - a config written before the spear/knight variants existed turned
-     * {@code enableSpearVariant} / {@code enableKnightVariant} off and their chances to zero, so no
-     * chimera ever rolled a variant again. Merging the missing keys in first, then writing the file
-     * back, keeps old configs working and makes new keys visible to the player.
+     * broken". Merging the missing keys in first, then writing the file back, keeps old configs working
+     * and makes new keys visible to the player.
+     *
+     * <p>It also strips the retired 26.3 keys ({@code *Spear*} / {@code *Knight*}), so a config carried
+     * over from that build does not keep a pile of dead settings.
      */
     private static ForbiddenChimeraConfig readMerged(Reader reader) {
         JsonObject stored = GSON.fromJson(reader, JsonObject.class);
@@ -420,6 +359,20 @@ public final class ForbiddenChimeraConfig {
         // 迁移必须跑在"补键"之前：老配置文件里根本没有 configVersion 这个键，一旦先回填就会被填成
         // 新版本号，迁移条件就永远不成立。这里直接读原始 JSON，缺键时按 0 处理（= v1 之前的老配置）。
         migrateStoredDefaults(stored);
+
+        // Retired keys: the spear and knight variants do not exist on 1.20.1 (no spears, no mace, no
+        // item components), so their settings are dropped instead of lingering as no-ops.
+        List<String> retired = new ArrayList<>();
+        for (String key : List.copyOf(stored.keySet())) {
+            if (isRetiredKey(key)) {
+                stored.remove(key);
+                retired.add(key);
+            }
+        }
+        if (!retired.isEmpty()) {
+            Constants.LOG.info("Removed {} retired config key(s) from {}: {}",
+                    retired.size(), FILE_NAME, String.join(", ", retired));
+        }
 
         JsonObject defaults = GSON.toJsonTree(new ForbiddenChimeraConfig()).getAsJsonObject();
         List<String> added = new ArrayList<>();
@@ -436,6 +389,18 @@ public final class ForbiddenChimeraConfig {
 
         ForbiddenChimeraConfig merged = GSON.fromJson(stored, ForbiddenChimeraConfig.class);
         return merged != null ? merged : new ForbiddenChimeraConfig();
+    }
+
+    /**
+     * Whether a stored key belongs to the retired spear / knight variants.
+     *
+     * <p>Matched by name rather than by a fixed list so a key added by a future 26.3 release is cleaned
+     * up too, and so the rule is readable at a glance.
+     */
+    private static boolean isRetiredKey(String key) {
+        return key.startsWith("knight") || key.endsWith("SpearVariant") || key.endsWith("SpearVariantChance")
+                || key.equals("enableSpearVariant") || key.equals("spearVariantChance")
+                || key.equals("spearDiveDamageScale");
     }
 
     /**
@@ -457,8 +422,6 @@ public final class ForbiddenChimeraConfig {
         }
 
         // v1 -> v2：玩家反馈核弹幻翼盘旋太久、爆炸范围偏小。
-        // 只覆盖这两个键：它们的旧默认值（100 / 8.0）本身就是"默认值"，不是玩家的调参结果，
-        // 所以升级不会踩掉任何有意为之的配置。
         if (storedVersion < 2) {
             stored.addProperty("nuclearCircleTicks", 40);
             stored.addProperty("nuclearExplosionRadius", 10.0D);

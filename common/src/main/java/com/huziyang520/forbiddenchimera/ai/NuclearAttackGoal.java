@@ -51,9 +51,8 @@ public class NuclearAttackGoal extends Goal {
      * Horizontal stand-off kept between the mob and its steering point during the dive.
      *
      * <p>See {@link #tickCharge}: the flight move control derives the body yaw from
-     * {@code atan2(dz, dx)} of the point it is steering at, so that point must never sit directly above or
-     * below the mob or the bearing degenerates and the nose swings to an arbitrary direction. Keeping a
-     * small horizontal offset keeps the bearing - and therefore the facing - on the player.
+     * {@code atan2(dz, dx)} of the point it is steering at, so that point must never sit directly above
+     * or below the mob or the bearing degenerates and the nose swings to an arbitrary direction.
      */
     private static final double CHARGE_MIN_HORIZONTAL = 0.5D;
 
@@ -64,9 +63,8 @@ public class NuclearAttackGoal extends Goal {
     /**
      * The hover point, frozen when the hover begins.
      *
-     * <p>It used to be recomputed every tick from the mob's own bearing to the target, which made the
-     * goal post move as the mob flew towards it: the thing chased its own offset and read as circling
-     * instead of lining up. Computed once, the mob settles into position.
+     * <p>Recomputing it every tick made the goal post move as the mob flew towards it: the thing chased
+     * its own offset and read as circling instead of lining up. Computed once, the mob settles in.
      */
     private double hoverX;
     private double hoverZ;
@@ -203,10 +201,6 @@ public class NuclearAttackGoal extends Goal {
      * <p>The offset is what makes the dive visible. Hovering straight above the target turned the charge
      * into a vertical drop from out of view; from a horizontal offset the charge is a diagonal dive.
      * The azimuth is kept from where the circle left the mob, so the approach angle differs run to run.
-     *
-     * <p>If it already sits directly above the target the azimuth is undefined, so the fallback is the
-     * target's own facing direction - that puts it in front of the player's eyes rather than blind
-     * overhead.
      */
     private double[] hoverPoint(LivingEntity target, ForbiddenChimeraConfig config) {
         double offset = config.nuclearHoverOffset;
@@ -258,8 +252,6 @@ public class NuclearAttackGoal extends Goal {
      *
      * <p>Only useful once the move control has been parked (see {@link #parkAndFace}); while it is
      * actively steering it rewrites the yaw again later in the same tick and this would be discarded.
-     * {@code yBodyRot} and {@code yHeadRot} are set alongside {@code yRot} because the body turn is what
-     * the renderer reads and the head turn otherwise lags a tick behind it.
      */
     private void faceTowards(LivingEntity target) {
         double dx = target.getX() - this.mob.getX();
@@ -289,6 +281,6 @@ public class NuclearAttackGoal extends Goal {
         // A plain explosion does not set anything on fire, and this one is meant to be a small nuke.
         ChimeraFire.burnAfterExplosion(serverLevel, x, y, z, config.nuclearExplosionRadius,
                 config.nuclearExplosionFireTicks, config.nuclearExplosionFireChance);
-        this.mob.kill(serverLevel);
+        this.mob.kill();
     }
 }

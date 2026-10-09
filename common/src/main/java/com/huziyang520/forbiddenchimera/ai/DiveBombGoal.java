@@ -19,22 +19,21 @@ import net.minecraft.world.phys.Vec3;
  *       {@code diverClimbHeight} above the target, so the salvo - and the dive that follows it - comes
  *       in diagonally instead of from straight overhead;</li>
  *   <li>skulls are fired <b>only during the salvo phase</b>, from that same attack position, and only
- *       while still at least {@code diverFireMinDistance} away (horizontal distance). Shots from
- *       directly above the player are almost impossible to dodge, which made the chimera feel unfair;</li>
- *   <li>the dive itself <b>never fires</b>. It used to shoot on the way in, so the phantom flew
- *       straight into the blast of the skull it had just launched and blew itself up ("每次发射头颅之后
- *       马上冲向玩家，结果把自己炸死"). Firing first and charging afterwards keeps both halves of the
- *       attack readable, and the salvo distance is the existing approach distance, not a new one;</li>
+ *       while still at least {@code diverFireMinDistance} away (horizontal distance);</li>
+ *   <li>the dive itself <b>never fires</b>, so the phantom cannot fly into the blast of the skull it
+ *       just launched;</li>
  *   <li>the salvo is bounded by {@code diverSalvoCount} shots and by a timeout, so a target that stays
- *       too close to shoot at (or a mob that cannot line up) still gets charged instead of hovering
- *       forever;</li>
- *   <li>the approach point is recomputed whenever a run starts, so it stays behind wherever the
- *       player is moving to.</li>
+ *       too close to shoot at still gets charged instead of hovering forever.</li>
  * </ul>
  *
  * <p>The dive cooldown lives on the entity ({@link CreeperPhantomEntity#attackCooldown()}), not in a
  * goal field: goals stop ticking the moment they lose their target, and a frozen cooldown means the
  * mob never attacks again.
+ *
+ * <p><b>Porting note.</b> The 26.3 build resolved the contact hit through {@code performDiveHit}, which
+ * could route to a spear's own kinetic-weapon rules. Spears do not exist in 1.20.1, so the contact hit
+ * is always the entity's ordinary melee attack and this goal calls
+ * {@link CreeperPhantomEntity#performDiveHit} purely as the entity-side seam it always was.
  */
 public class DiveBombGoal extends Goal {
 
@@ -58,9 +57,8 @@ public class DiveBombGoal extends Goal {
     /**
      * 本轮是否真的打出过头颅。
      *
-     * <p>原来叫 {@code firedThisDive}，语义没变，只是开火从俯冲挪到了开火阶段：它仍然负责把"打完了
-     * 才收手"和"纯粹扑空"两种情况分开——{@code diverPassByTicks} 与越肩判定只对前者生效，所以不会
-     * 发头颅的末影幻翼（它整轮都不会置位）依旧只受 {@code diverMaxDiveTicks} 约束。
+     * <p>它把"打完了才收手"和"纯粹扑空"两种情况分开——{@code diverPassByTicks} 与越肩判定只对前者
+     * 生效，所以不会发头颅的末影幻翼（它整轮都不会置位）依旧只受 {@code diverMaxDiveTicks} 约束。
      */
     private boolean firedThisRun;
     /** Closest horizontal distance reached during the current dive, used to detect the pass-by. */
@@ -195,12 +193,9 @@ public class DiveBombGoal extends Goal {
      * 在就位点悬停并按 {@code diverSalvoIntervalTicks} 的间隔打出 {@code diverSalvoCount} 颗头颅，
      * 打完（或超时）再进入俯冲。
      *
-     * <p>站位就停在爬升阶段的 {@code approachPoint} 上，也就是水平 {@code diverApproachOffset} 格、
-     * 高 {@code diverClimbHeight} 格处，没有新增硬编码距离。原地悬停（速度 0）是为了让每一发都从
-     * 同一个斜上方角度出去，也让玩家有时间反应。
-     *
-     * <p>每一发都要过一遍原来的可用性判断（{@code canFireSkulls} / {@code canFire} / 距离），任何一条
-     * 不满足就只是等；{@code salvoTicks} 的超时保证不会因为玩家贴脸站着而永久卡在开火阶段。
+     * <p>原地悬停（速度 0）是为了让每一发都从同一个斜上方角度出去，也让玩家有时间反应。
+     * 每一发都要过一遍原来的可用性判断，任何一条不满足就只是等；{@code salvoTicks} 的超时保证不会
+     * 因为玩家贴脸站着而永久卡在开火阶段。
      */
     private void tickSalvo(LivingEntity target, ForbiddenChimeraConfig config) {
         this.salvoTicks++;
@@ -244,8 +239,7 @@ public class DiveBombGoal extends Goal {
 
         if (this.mob.getBoundingBox().inflate(0.6D).intersects(target.getBoundingBox())) {
             if (this.mob.level() instanceof ServerLevel serverLevel) {
-                // The entity decides how the contact hit resolves: plain melee, or the spear's own
-                // kinetic weapon damage when this individual rolled the spear variant.
+                // The entity owns how the contact hit resolves; see performDiveHit.
                 this.mob.performDiveHit(serverLevel, target);
             }
             this.endRun(config);

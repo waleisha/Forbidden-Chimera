@@ -1,6 +1,7 @@
 package com.huziyang520.forbiddenchimera.entity;
 
 import com.huziyang520.forbiddenchimera.registry.ModEntities;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
@@ -26,13 +27,7 @@ public class LightningCreeperPhantomEntity extends CreeperPhantomEntity {
     }
 
     @Override
-    protected CreeperSkullProjectile newSkull(net.minecraft.server.level.ServerLevel level, Vec3 direction) {
-        return new LightningCreeperSkullProjectile(ModEntities.lightningCreeperSkull(), this, direction, level);
-    }
-
-    /** The knight variant is defined for the plain Creeper Phantom (mob3) only. */
-    @Override
-    protected boolean supportsKnightVariant() {
-        return false;
+    protected CreeperSkullProjectile newSkull(ServerLevel level, Vec3 direction) {
+        return new LightningCreeperSkullProjectile(ModEntities.LIGHTNING_CREEPER_SKULL.get(), this, direction, level);
     }
 }

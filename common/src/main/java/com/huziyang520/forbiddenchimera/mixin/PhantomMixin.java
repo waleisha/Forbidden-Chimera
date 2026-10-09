@@ -3,7 +3,6 @@ package com.huziyang520.forbiddenchimera.mixin;
 import com.huziyang520.forbiddenchimera.Constants;
 import com.huziyang520.forbiddenchimera.ai.ChimeraPlayerTargetGoal;
 import com.huziyang520.forbiddenchimera.ai.ChimeraSteering;
-import com.huziyang520.forbiddenchimera.ai.ChimeraTargeting;
 import com.huziyang520.forbiddenchimera.ai.RiderChargeGoal;
 import com.huziyang520.forbiddenchimera.ai.ThrowerDropGoal;
 import com.huziyang520.forbiddenchimera.config.ForbiddenChimeraConfig;
@@ -11,15 +10,14 @@ import com.huziyang520.forbiddenchimera.entity.ChimeraPhantom;
 import com.huziyang520.forbiddenchimera.entity.ChimeraVariant;
 import com.huziyang520.forbiddenchimera.world.ChimeraExplosion;
 import com.huziyang520.forbiddenchimera.world.PhantomCargo;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.monster.Creeper;
 import net.minecraft.world.entity.monster.Phantom;
-import net.minecraft.world.level.storage.ValueInput;
-import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -47,10 +45,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  *   <li>steering goes through {@link PhantomAccessor} ({@code moveTargetPoint}); the phantom move
  *       control ignores {@code MoveControl#wantedPosition} entirely;</li>
  *   <li>the "no replacement cargo after detonation" guard is what stops the charge from leaving a
- *       brain dead creeper standing next to the player;</li>
- *   <li>a one-shot geometry report is logged per variant, so a render/cargo mismatch can be measured
- *       from the log instead of being eyeballed.</li>
+ *       brain dead creeper standing next to the player.</li>
  * </ul>
+ *
+ * <p><b>Porting note - what is NOT here any more.</b> The 26.3 version carried an
+ * {@code asValidTarget} override whose whole purpose was to stop vanilla from discarding a creative
+ * player as a target. That method only exists from 1.21.2; in 1.20.1 {@code Mob#setTarget} stores
+ * whatever it is given, so {@link ChimeraPlayerTargetGoal} works unaided and the override is gone.
+ * The save data also moved from {@code ValueOutput}/{@code ValueInput} to a plain {@link CompoundTag}.
  */
 @Mixin(Phantom.class)
 public abstract class PhantomMixin implements ChimeraPhantom, ChimeraSteering {
@@ -157,36 +159,7 @@ public abstract class PhantomMixin implements ChimeraPhantom, ChimeraSteering {
         }
 
         // The carrier does not survive its own payload.
-        self.kill(serverLevel);
-    }
-
-    // --- targeting ----------------------------------------------------------
-
-    /**
-     * Lets the two vanilla-phantom chimeras hold a creative or spectator player as their target.
-     *
-     * <p>{@code Mob#setTarget} runs every value through {@code asValidTarget}, which rejects creative and
-     * spectator players outright, and {@code Mob#getTarget} filters the stored field through it again - so
-     * the target {@link ChimeraPlayerTargetGoal} writes is dropped unless this is overridden. The mixin
-     * method is an ordinary override of {@code Mob}'s (the vanilla phantom does not define one).
-     *
-     * <p>No {@code @Override} here on purpose: this class does not extend {@code Mob}, so the annotation
-     * would not compile. Mixin merges the method into the target by name and descriptor, and
-     * {@code asValidTarget} is inherited from {@code Mob}, so it becomes a real override.
-     *
-     * <p><b>This override sits on every vanilla phantom in the world</b>, including the ones that are not
-     * chimeras at all, so the creative exemption is applied per instance: only {@link ChimeraVariant#RIDER}
-     * and {@link ChimeraVariant#THROWER} go through {@link ChimeraTargeting#filter}. A phantom that rolled
-     * {@link ChimeraVariant#VANILLA} - or has not been decided yet - gets {@code vanillaFilter} and stays
-     * byte-for-byte vanilla in this respect, whatever {@code attackCreativePlayers} says. Without that
-     * split, turning the key on would make <b>plain phantoms</b> hunt creative-mode players, which is a
-     * vanilla behaviour regression and not a configurable feature.
-     */
-    protected @Nullable LivingEntity asValidTarget(@Nullable LivingEntity target) {
-        Phantom self = (Phantom) (Object) this;
-        return this.forbiddenChimera$variant.carriesCargo()
-                ? ChimeraTargeting.filter(self, target)
-                : ChimeraTargeting.vanillaFilter(self, target);
+        self.kill();
     }
 
     // --- ChimeraSteering ----------------------------------------------------
@@ -213,7 +186,6 @@ public abstract class PhantomMixin implements ChimeraPhantom, ChimeraSteering {
         // VANILLA（以及任何将来不携带货物的变体）必须在这里就退出：它得是一只<b>行为上完全原版</b>的
         // 幻翼，不能挂 cargo 苦力怕、不能注入任何 Goal。判据是 carriesCargo() 这个显式白名单，
         // 而不是"不等于 THROWER 就当骑士"——后者会把 VANILLA 误认成嵌合体，从而给它装上骑士的俯冲。
-        // 注意这里提前 return 不会漏掉初始化标记：本变体根本没有需要置位的标记，也没有每 tick 重试。
         if (!this.forbiddenChimera$variant.carriesCargo()) {
             return;
         }
@@ -272,7 +244,7 @@ public abstract class PhantomMixin implements ChimeraPhantom, ChimeraSteering {
      * Logs the exact geometry once per phantom, so any future render/cargo mismatch can be measured
      * from the log instead of being eyeballed.
      *
-     * <p>Vanilla pipeline constants (26.3, {@code LivingEntityRenderer#submit}): the model transform
+     * <p>Vanilla pipeline constants (1.20.1, {@code LivingEntityRenderer#render}): the model transform
      * ends with {@code translate(0, -1.501, 0)} and the phantom renderer contributes +1.3125 before it,
      * so the model band is {@code [1.501 - 1.3125 - 0.125, 1.501 - 1.3125 + 0.125]} = [0.0635, 0.3135]
      * above the phantom's feet, inside its 0.5 tall hitbox.
@@ -294,13 +266,14 @@ public abstract class PhantomMixin implements ChimeraPhantom, ChimeraSteering {
     }
 
     @Inject(method = "addAdditionalSaveData", at = @At("TAIL"))
-    private void forbiddenChimera$saveVariant(ValueOutput output, CallbackInfo callback) {
-        output.putInt(VARIANT_KEY, this.forbiddenChimera$variant.id());
+    private void forbiddenChimera$saveVariant(CompoundTag tag, CallbackInfo callback) {
+        tag.putInt(VARIANT_KEY, this.forbiddenChimera$variant.id());
     }
 
     @Inject(method = "readAdditionalSaveData", at = @At("TAIL"))
-    private void forbiddenChimera$loadVariant(ValueInput input, CallbackInfo callback) {
+    private void forbiddenChimera$loadVariant(CompoundTag tag, CallbackInfo callback) {
         this.forbiddenChimera$variant = ChimeraVariant.byId(
-                input.getIntOr(VARIANT_KEY, ChimeraVariant.UNDECIDED.id()), ChimeraVariant.UNDECIDED);
+                tag.contains(VARIANT_KEY) ? tag.getInt(VARIANT_KEY) : ChimeraVariant.UNDECIDED.id(),
+                ChimeraVariant.UNDECIDED);
     }
 }

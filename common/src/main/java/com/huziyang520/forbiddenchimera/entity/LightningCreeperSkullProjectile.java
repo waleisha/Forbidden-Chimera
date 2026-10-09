@@ -1,7 +1,6 @@
 package com.huziyang520.forbiddenchimera.entity;
 
 import com.huziyang520.forbiddenchimera.config.ForbiddenChimeraConfig;
-import net.minecraft.core.particles.ColorParticleOption;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
@@ -11,7 +10,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import org.jspecify.annotations.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * 闪电苦力怕头颅 - the charged missile of the Lightning Creeper Phantom.
@@ -20,15 +19,13 @@ import org.jspecify.annotations.Nullable;
  * radius, config {@code lightningSkullExplosionRadius}) and in how much of that blast its own shooter
  * takes (config {@code lightningSkullOwnerDamageFactor}, default 0.02 = 98% reduction).
  *
- * <p>The lightning look is three layered effects, all on top of the vanilla recipe:
- * <ul>
- *   <li>the vanilla charged creeper armour texture is not just on the mob - this skull <b>is</b> the
- *       charged thing, so it is drawn as a creeper head (vanilla item renderer) wrapped in electric
- *       sparks;</li>
- *   <li>a dense {@code ELECTRIC_SPARK} trail while flying (the base skull trails smoke instead);</li>
- *   <li>on detonation: a flash, a spark burst and thunder, so the impact reads as lightning rather
- *       than as a plain creeper blast.</li>
- * </ul>
+ * <p>The lightning look is three layered effects, all on top of the vanilla recipe: a dense
+ * {@code ELECTRIC_SPARK} trail while flying (the base skull trails smoke instead), and on detonation a
+ * flash, a spark burst and thunder, so the impact reads as lightning rather than as a plain creeper
+ * blast.
+ *
+ * <p><b>Porting note.</b> 26.3's {@code ColorParticleOption} does not exist in 1.20.1 - {@code FLASH} is
+ * a plain {@code SimpleParticleType} here, so it is sent directly with no colour wrapper.
  */
 public class LightningCreeperSkullProjectile extends CreeperSkullProjectile {
 
@@ -69,10 +66,7 @@ public class LightningCreeperSkullProjectile extends CreeperSkullProjectile {
 
     @Override
     protected void spawnDetonationEffects(ServerLevel level, double x, double y, double z) {
-        // ParticleTypes.FLASH is a ParticleType<ColorParticleOption>, not a ParticleOptions itself, so it
-        // has to be wrapped before it can be sent.
-        level.sendParticles(ColorParticleOption.create(ParticleTypes.FLASH, 0xFFFFFF), x, y, z, 1,
-                0.0D, 0.0D, 0.0D, 0.0D);
+        level.sendParticles(ParticleTypes.FLASH, x, y, z, 1, 0.0D, 0.0D, 0.0D, 0.0D);
         level.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, DETONATION_SPARKS, 1.4D, 1.0D, 1.4D, 0.45D);
         level.sendParticles(ParticleTypes.EXPLOSION, x, y, z, 6, 1.0D, 0.6D, 1.0D, 0.1D);
         level.playSound(null, x, y, z, SoundEvents.LIGHTNING_BOLT_THUNDER, SoundSource.HOSTILE, 2.0F, 1.3F);
