@@ -107,6 +107,12 @@ tasks.named('compileJava', JavaCompile).configure {
 tasks.named('jar', Jar).configure {
     from project(':common').file('src/main/resources')
 
+    // Ship the licence inside the jar, renamed so it cannot collide with another mod's LICENSE when
+    // several jars are unpacked side by side. Same convention as the 26.3 build.
+    from(rootProject.file('LICENSE')) {
+        rename { "${it}_${mod_name}" }
+    }
+
     manifest {
         attributes([
                 'Specification-Title'   : mod_id,
